@@ -1,1 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>F1 3D v0 test — Silverstone, real telemetry on real track geometry</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.120.0/Cesium.js"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.120.0/Widgets/widgets.css" rel="stylesheet">
+<style>
+  html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
+  #status { position: absolute; top: 10px; left: 10px; z-index: 999; background: #0D0D0D; color: #E8FF00;
+            font-family: monospace; font-size: 13px; padding: 10px 14px; max-width: 480px; white-space: pre-wrap; }
+  #controls { position: absolute; bottom: 10px; left: 10px; z-index: 999; }
+  button { background:#0D0D0D; color:#F0EDE6; border:1px solid #E8FF00; padding:8px 14px; font-family:monospace; cursor:pointer; }
+</style>
+</head>
+<body>
+<div id="status">Loading...</div>
+<div id="controls"><button id="playBtn">Play lap</button></div>
+<div id="cesiumContainer"></div>
 
+<script>
+/* ============================================================
+   BEFORE THIS RUNS:
+
+   Paste your Cesium ion token below where it says
+   YOUR_CESIUM_ION_TOKEN. Get one (or a fresh one, if the old
+   one was rotated) at ion.cesium.com -> Access Tokens.
+   Never commit a real token to this file in a public repo —
+   paste it locally only, or wire it through Netlify env vars
+   if this needs to work on the deployed site.
+   ============================================================ */
+
+const CESIUM_ION_TOKEN = "YOUR_CESIUM_ION_TOKEN";
+
+const MUNICH_CENTERLINE_URL = "https://raw.githubusercontent.com/TUMFTM/racetrack-database/master/tracks/Silverstone.csv";
+
+const statusEl = document.getElementById("status");
+function log(msg) {
+  console.log(msg);
+  statusEl.textContent = msg;
+}
+
+try {
+  if (typeof Cesium === "undefined") {
+    throw new Error("Cesium library never loaded — likely a slow or blocked connection to cdnjs.cloudflare.com. Try reloading, or switch networks (wifi vs cellular).");
+  }
+  Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
+} catch (err) {
+  statusEl.textContent = "FAILED before setup: " + err.message;
+  throw err;
+}
+
+let viewer;
+let centerlineLatLon = [];  // real-world [lon, lat] pairs, from Munich data
+let carFrames = [];         // OpenF1 position samples, in arrival order
+let cameraEntity;
+
+async function init() {
+  log("Setting up Cesium viewer...");
+  viewer = new Cesium.Viewer("cesiumContainer", {
+    terrain: Cesium.Terrain.fromWorldTerrain(),
+    baseLayerPicker: false,
+    timeline: false,
+    animation: false,
+  });
+  viewer.scene.primitives.add(await Cesium.createOsmBuildingsAsync());
+
+  try {
+    await Promise.all([loadMunichCenterline(), loadOpenF1Data()]);
+    log("Data loaded. Position samples: " + carFrames.length +
+        " | Centerline points: " + centerlineLatLon.length +
+        "\nPress Play lap.");
+    buildCameraPath();
+  } catch (err) {
+    log("FAILED: " + err.message + "\n\nCheck the setup step at the top of this file.");
+    console.error(err);
+  }
+}
+
+// --- Step 1: real track geometry (Munich database) ---
+// ANCHOR: Silverstone's real-world coordinates, confirmed via multiple
+// sources. Local file meters get placed against this real point.
+const ANCHOR_LAT = 52.0717;
+const ANCHOR_LON = -1.0159;
+// NOTE: the rotation between the local file's x/y grid and true
+// east/north is NOT confirmed — x is being treated as east-meters and
+// y as north-meters as a first guess. If the track shape looks rotated
+// wrong once this loads, that's the next thing to fix, not a bug.
+let centerlineCartesians = [];
+
+async function loadMunichCenterline() {
+  const res = await fetch(MUNICH_CENTERLINE_URL);
+  if (!res.ok) throw new Error("Munich centerline fetch failed (" + res.status + "). Check the filename — see comment at top of file.");
+  const text = await res.text();
+  const lines = text.trim().split("\n").filter(l => !l.startsWith("#"));
+  centerlineLatLon = lines.map(line => {
+    const [x, y] = line.split(",").map(Number);
+    return { x_m: x, y_m: y };
+  });
+
+  const x0 = centerlineLatLon[0].x_m;
+  const y0 = centerlineLatLon[0].y_m;
+  const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 500);
+  const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
+  centerlineCartesians = centerlineLatLon.map(pt => {
+    const localOffset = new Cesium.Cartesian3(pt.x_m - x0, pt.y_m - y0, 0);
+    return Cesium.Matrix4.multiplyByPoint(enuMatrix, localOffset, new Cesium.Cartesian3());
+  });
+}
+
+// --- Step 2: real car telemetry (OpenF1) ---
+async function loadOpenF1Data() {
+  // v0 goal: prove the pipeline, not track a specific driver — so this
+  // grabs whichever race session comes back for Silverstone/Great Britain
+  // and just takes the first driver with data. Swap back to a specific
+  // driver/session once the mapping itself is proven to work.
+  const sessRes = await fetch("https://api.openf1.org/v1/sessions?country_name=United Kingdom&year=2026&session_type=Race");
+  const sessions = await sessRes.json();
+  if (!sessions.length) throw new Error("No 2026 Great Britain race session found in OpenF1.");
+  const sessionKey = sessions[0].session_key;
+
+  const drvRes = await fetch(`https://api.openf1.org/v1/drivers?session_key=${sessionKey}`);
+  const drivers = await drvRes.json();
+  if (!drivers.length) throw new Error("No drivers found for this session.");
+  const driver = drivers[0];
+
+  const locRes = await fetch(`https://api.openf1.org/v1/location?session_key=${sessionKey}&driver_number=${driver.driver_number}`);
+  carFrames = await locRes.json();
+  if (!carFrames.length) throw new Error("No location data returned for driver " + driver.driver_number + ".");
+}
+
+// --- Step 3: build the camera path ---
+// v0 SIMPLIFICATION: mapping progress by INDEX FRACTION through the lap,
+// not yet by real cumulative distance (that's the next refinement once
+// this loads at all). Good enough to see, by eye, whether the shape
+// traced even resembles the real track.
+function buildCameraPath() {
+  document.getElementById("playBtn").onclick = () => playLap();
+}
+
+function playLap() {
+  if (!centerlineCartesians.length) { log("No centerline loaded — can't play."); return; }
+  let i = 0;
+  const total = centerlineCartesians.length;
+  log("Playing lap — camera following the real anchored track shape.");
+  const interval = setInterval(() => {
+    if (i >= total) { clearInterval(interval); return; }
+    const pos = centerlineCartesians[i];
+    const next = centerlineCartesians[(i + 1) % total];
+    viewer.camera.setView({
+      destination: pos,
+      orientation: {
+        direction: Cesium.Cartesian3.normalize(
+          Cesium.Cartesian3.subtract(next, pos, new Cesium.Cartesian3()),
+          new Cesium.Cartesian3()
+        ),
+        up: Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3()),
+      },
+    });
+    i += 1;
+  }, 50);
+}
+
+init();
+</script>
+</body>
+</html>
