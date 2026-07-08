@@ -30,9 +30,28 @@
    if this needs to work on the deployed site.
    ============================================================ */
 
-const CESIUM_ION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJmYjU2ZGRhNy00YzFlLTRlNmItYjIyZC02NGVkZTE3NDVkNWEiLCJpZCI6NDUzNTM3LCJzdWIiOiJNYXR6dW5hZ2EiLCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoiRjEgdGVzdGluZyAiLCJpYXQiOjE3ODM1MjA2OTd9.YKRKC1nre1fGJqU5NhdN6YFPVpMGzxW1sMuRrOY15yQ";
+const CESIUM_ION_TOKEN = "YOUR_CESIUM_ION_TOKEN";
 
 const MUNICH_CENTERLINE_URL = "https://raw.githubusercontent.com/TUMFTM/racetrack-database/master/tracks/Silverstone.csv";
+
+// TUNE THESE TWO BY EYE, in order:
+// 1. ROTATION_OFFSET_DEG — steps of 15 or 30 until the yellow track line
+//    (added below) sits on the real tarmac in the satellite imagery
+//    instead of off to the side.
+// 2. HEIGHT_ABOVE_TRACK / CAMERA_PITCH_DEG — camera framing, once the
+//    rotation is correct and the track is actually visible.
+const ROTATION_OFFSET_DEG = 0;
+const HEIGHT_ABOVE_TRACK = 150;
+const DISTANCE_BEHIND = 60;
+const CAMERA_PITCH_DEG = -60;
+
+function rotateXY(dx, dy, angleDeg) {
+  const rad = Cesium.Math.toRadians(angleDeg);
+  return {
+    x: dx * Math.cos(rad) - dy * Math.sin(rad),
+    y: dx * Math.sin(rad) + dy * Math.cos(rad),
+  };
+}
 
 const statusEl = document.getElementById("status");
 function log(msg) {
@@ -68,6 +87,18 @@ async function init() {
     await Promise.all([loadMunichCenterline(), loadOpenF1Data()]);
     mapCarTelemetryToRealWorld();
     buildLapBuffers();
+
+    // Track polyline, drawn on the satellite imagery so rotation/anchor
+    // can be checked by eye — does the yellow line sit on real tarmac?
+    viewer.entities.add({
+      polyline: {
+        positions: centerlineCartesians,
+        width: 4,
+        material: Cesium.Color.fromCssColorString("#E8FF00"),
+        clampToGround: true,
+      },
+    });
+
     log("Data loaded. Position samples: " + carFrames.length +
         " | Centerline points: " + centerlineLatLon.length +
         " | Ghost buffer laps: " + lapBuffers.length +
@@ -84,10 +115,6 @@ async function init() {
 // sources. Local file meters get placed against this real point.
 const ANCHOR_LAT = 52.0717;
 const ANCHOR_LON = -1.0159;
-// NOTE: the rotation between the local file's x/y grid and true
-// east/north is NOT confirmed — x is being treated as east-meters and
-// y as north-meters as a first guess. If the track shape looks rotated
-// wrong once this loads, that's the next thing to fix, not a bug.
 let centerlineCartesians = [];
 let centerlineHeadings = [];  // per-point track heading, radians, for camera aim
 
@@ -103,34 +130,30 @@ async function loadMunichCenterline() {
 
   const x0 = centerlineLatLon[0].x_m;
   const y0 = centerlineLatLon[0].y_m;
-  // HEIGHT FIX: was 500 (meant for an overview camera shot), which put
-  // the whole track 500m above real ground since this anchor doubles as
-  // the coordinate origin. 0 = ground level, correct for the track itself.
+  // Ground level (0), not 500 — that height was only ever meant for an
+  // overview camera shot, not as the coordinate anchor for the track.
   const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 0);
   const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
   centerlineCartesians = centerlineLatLon.map(pt => {
-    const localOffset = new Cesium.Cartesian3(pt.x_m - x0, pt.y_m - y0, 0);
+    const r = rotateXY(pt.x_m - x0, pt.y_m - y0, ROTATION_OFFSET_DEG);
+    const localOffset = new Cesium.Cartesian3(r.x, r.y, 0);
     return Cesium.Matrix4.multiplyByPoint(enuMatrix, localOffset, new Cesium.Cartesian3());
   });
 
-  // Track heading per point, used by camera.lookAt() so the chase cam
-  // always faces along the track instead of computing raw direction
-  // vectors every frame (that approach went degenerate at some points
-  // and caused the black/terrain flicker).
+  // Track heading per point, used for camera aim — computed once here
+  // instead of raw per-frame vector math, which went degenerate at some
+  // points and caused flicker in an earlier version.
   centerlineHeadings = centerlineLatLon.map((pt, i) => {
     const next = centerlineLatLon[(i + 1) % centerlineLatLon.length];
     const dx = next.x_m - pt.x_m;
     const dy = next.y_m - pt.y_m;
-    return Math.atan2(dx, dy);
+    const r = rotateXY(dx, dy, ROTATION_OFFSET_DEG);
+    return Math.atan2(r.x, r.y);
   });
 }
 
 // --- Step 2: real car telemetry (OpenF1) ---
 async function loadOpenF1Data() {
-  // v0 goal: prove the pipeline, not track a specific driver — so this
-  // grabs whichever race session comes back for Silverstone/Great Britain
-  // and just takes the first driver with data. Swap back to a specific
-  // driver/session once the mapping itself is proven to work.
   const sessRes = await fetch("https://api.openf1.org/v1/sessions?country_name=United Kingdom&year=2026&session_type=Race");
   const sessions = await sessRes.json();
   if (!sessions.length) throw new Error("No 2026 Great Britain race session found in OpenF1.");
@@ -163,7 +186,8 @@ function mapCarTelemetryToRealWorld() {
   const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 0);
   const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
   carCartesiansAll = carFrames.map(f => {
-    const localOffset = new Cesium.Cartesian3(f.x - x0, f.y - y0, 0);
+    const r = rotateXY(f.x - x0, f.y - y0, ROTATION_OFFSET_DEG);
+    const localOffset = new Cesium.Cartesian3(r.x, r.y, 0);
     return Cesium.Matrix4.multiplyByPoint(enuMatrix, localOffset, new Cesium.Cartesian3());
   });
 }
@@ -243,37 +267,33 @@ function playLap() {
       return;
     }
     const pos = centerlineCartesians[i];
-
-    // CAMERA FIX: was raw direction/up vector math, which went degenerate
-    // at some track points (near-parallel vectors) and caused the
-    // black/terrain flicker. lookAt() with heading/pitch/range is stable
-    // and always aims down at the track from behind, using it as a guide.
     const nextPos = centerlineCartesians[(i + 1) % total];
-const forward = Cesium.Cartesian3.normalize(
-  Cesium.Cartesian3.subtract(nextPos, pos, new Cesium.Cartesian3()),
-  new Cesium.Cartesian3()
-);
-const groundNormal = Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3());
-const HEIGHT_ABOVE_TRACK = 300;   // meters up — raise this for more "bird" feel
-const DISTANCE_BEHIND = 60;      // meters back from the car
-const cameraPos = Cesium.Cartesian3.add(
-  Cesium.Cartesian3.add(
-    pos,
-    Cesium.Cartesian3.multiplyByScalar(forward, -DISTANCE_BEHIND, new Cesium.Cartesian3()),
-    new Cesium.Cartesian3()
-  ),
-  Cesium.Cartesian3.multiplyByScalar(groundNormal, HEIGHT_ABOVE_TRACK, new Cesium.Cartesian3()),
-  new Cesium.Cartesian3()
-);
-viewer.camera.setView({
-  destination: cameraPos,
-  orientation: {
-    heading: centerlineHeadings[i],
-    pitch: Cesium.Math.toRadians(-45),   // steeper = more top-down/bird-like
-    roll: 0,
-  },
-});
 
+    // Explicit camera position — behind and above the car, aimed with
+    // heading/pitch. This replaced camera.lookAt(), which put the
+    // camera inside the terrain mesh (all-black render, red dot only).
+    const forward = Cesium.Cartesian3.normalize(
+      Cesium.Cartesian3.subtract(nextPos, pos, new Cesium.Cartesian3()),
+      new Cesium.Cartesian3()
+    );
+    const groundNormal = Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3());
+    const cameraPos = Cesium.Cartesian3.add(
+      Cesium.Cartesian3.add(
+        pos,
+        Cesium.Cartesian3.multiplyByScalar(forward, -DISTANCE_BEHIND, new Cesium.Cartesian3()),
+        new Cesium.Cartesian3()
+      ),
+      Cesium.Cartesian3.multiplyByScalar(groundNormal, HEIGHT_ABOVE_TRACK, new Cesium.Cartesian3()),
+      new Cesium.Cartesian3()
+    );
+    viewer.camera.setView({
+      destination: cameraPos,
+      orientation: {
+        heading: centerlineHeadings[i],
+        pitch: Cesium.Math.toRadians(CAMERA_PITCH_DEG),
+        roll: 0,
+      },
+    });
 
     liveCarEntity.position = pos;
 
