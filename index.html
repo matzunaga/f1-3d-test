@@ -32,6 +32,14 @@
     Zoom: <span id="zoomVal">1.0</span>x
     <input id="zoomSlider" type="range" min="30" max="400" value="100">
   </label>
+  <label id="rotWrap">
+    Shift E/W: <span id="panEVal">0</span>m
+    <input id="panESlider" type="range" min="-1000" max="1000" value="0">
+  </label>
+  <label id="rotWrap">
+    Shift N/S: <span id="panNVal">0</span>m
+    <input id="panNSlider" type="range" min="-1000" max="1000" value="0">
+  </label>
 </div>
 <div id="cesiumContainer"></div>
 
@@ -65,6 +73,13 @@ const CAMERA_PITCH_DEG = -60;
 // "fighting." This slider is read inside that same per-frame update
 // instead, so zoom actually sticks during playback.
 let zoomMultiplier = 1.0;
+
+// Live position offset, in real meters east and north of the anchor —
+// driven by the two Shift sliders. Fixes a translation error (anchor
+// point not exactly matching the CSV's start point in real life)
+// separately from rotation, which is a different kind of error.
+let panEastM = 0;
+let panNorthM = 0;
 
 function rotateXY(dx, dy, angleDeg) {
   const rad = Cesium.Math.toRadians(angleDeg);
@@ -125,6 +140,16 @@ async function init() {
       zoomMultiplier = Number(e.target.value) / 100;
       document.getElementById("zoomVal").textContent = zoomMultiplier.toFixed(1);
     };
+    document.getElementById("panESlider").oninput = (e) => {
+      panEastM = Number(e.target.value);
+      document.getElementById("panEVal").textContent = panEastM;
+      recomputeGeometry();
+    };
+    document.getElementById("panNSlider").oninput = (e) => {
+      panNorthM = Number(e.target.value);
+      document.getElementById("panNVal").textContent = panNorthM;
+      recomputeGeometry();
+    };
   } catch (err) {
     log("FAILED: " + err.message + "\n\nCheck the setup step at the top of this file.");
     console.error(err);
@@ -171,7 +196,7 @@ function recomputeGeometry() {
 
   centerlineCartesians = centerlineLatLon.map(pt => {
     const r = rotateXY(pt.x_m - x0, pt.y_m - y0, ROTATION_OFFSET_DEG);
-    return Cesium.Matrix4.multiplyByPoint(enuMatrix, new Cesium.Cartesian3(r.x, r.y, 0), new Cesium.Cartesian3());
+    return Cesium.Matrix4.multiplyByPoint(enuMatrix, new Cesium.Cartesian3(r.x + panEastM, r.y + panNorthM, 0), new Cesium.Cartesian3());
   });
 
   centerlineHeadings = centerlineLatLon.map((pt, i) => {
@@ -229,7 +254,7 @@ function mapCarTelemetryToRealWorld() {
   const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
   carCartesiansAll = carFrames.map(f => {
     const r = rotateXY(f.x - x0, f.y - y0, ROTATION_OFFSET_DEG);
-    return Cesium.Matrix4.multiplyByPoint(enuMatrix, new Cesium.Cartesian3(r.x, r.y, 0), new Cesium.Cartesian3());
+    return Cesium.Matrix4.multiplyByPoint(enuMatrix, new Cesium.Cartesian3(r.x + panEastM, r.y + panNorthM, 0), new Cesium.Cartesian3());
   });
 }
 
