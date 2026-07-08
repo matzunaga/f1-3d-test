@@ -9,8 +9,13 @@
   html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
   #status { position: absolute; top: 10px; left: 10px; z-index: 999; background: #0D0D0D; color: #E8FF00;
             font-family: monospace; font-size: 13px; padding: 10px 14px; max-width: 480px; white-space: pre-wrap; }
-  #controls { position: absolute; bottom: 10px; left: 10px; z-index: 999; display: flex; gap: 8px; }
-  button { background:#0D0D0D; color:#F0EDE6; border:1px solid #E8FF00; padding:8px 14px; font-family:monospace; cursor:pointer; }
+  #controls { position: absolute; bottom: 14px; left: 14px; z-index: 999; display: flex; flex-wrap: wrap;
+              align-items: center; gap: 14px; background: rgba(13,13,13,0.75); padding: 12px 16px; border-radius: 6px; }
+  button { background:#0D0D0D; color:#F0EDE6; border:1px solid #E8FF00; padding:14px 22px; font-family:monospace;
+           font-size: 15px; cursor:pointer; border-radius: 4px; }
+  button:hover { background:#1a1a1a; }
+  #rotWrap { color:#F0EDE6; font-family:monospace; font-size:14px; display:flex; align-items:center; gap:8px; }
+  #rotSlider { width: 220px; vertical-align: middle; }
 </style>
 </head>
 <body>
@@ -18,6 +23,10 @@
 <div id="controls">
   <button id="playBtn">Play next lap</button>
   <button id="overviewBtn">Overview (top-down)</button>
+  <label id="rotWrap">
+    Rotation: <span id="rotVal">0</span>°
+    <input id="rotSlider" type="range" min="0" max="359" value="0">
+  </label>
 </div>
 <div id="cesiumContainer"></div>
 
@@ -33,18 +42,14 @@
    if this needs to work on the deployed site.
    ============================================================ */
 
-const CESIUM_ION_TOKEN = "YOUR_CESIUM_ION_TOKEN";
+const CESIUM_ION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJmYjU2ZGRhNy00YzFlLTRlNmItYjIyZC02NGVkZTE3NDVkNWEiLCJpZCI6NDUzNTM3LCJzdWIiOiJNYXR6dW5hZ2EiLCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoiRjEgdGVzdGluZyAiLCJpYXQiOjE3ODM1MjA2OTd9.YKRKC1nre1fGJqU5NhdN6YFPVpMGzxW1sMuRrOY15yQ";
 
 const MUNICH_CENTERLINE_URL = "https://raw.githubusercontent.com/TUMFTM/racetrack-database/master/tracks/Silverstone.csv";
 
-// TUNE THESE BY EYE:
-// 1. Tap "Overview" first — flies straight above the whole track so you
-//    can see if the yellow line matches the real tarmac shape at a glance.
-// 2. ROTATION_OFFSET_DEG — try 0, 90, 180, 270 first (cheap survey data
-//    is almost always aligned to a clean multiple of true north).
-// 3. HEIGHT_ABOVE_TRACK / CAMERA_PITCH_DEG — chase-cam framing, once the
-//    rotation is confirmed correct in the Overview.
-const ROTATION_OFFSET_DEG = 0;
+// Rotation is now a live slider (bottom left) — drag it and the yellow
+// line redraws in real time against the satellite imagery. No more
+// edit-commit-redeploy-screenshot loops to find the right angle.
+let ROTATION_OFFSET_DEG = 0;
 const HEIGHT_ABOVE_TRACK = 150;
 const DISTANCE_BEHIND = 60;
 const CAMERA_PITCH_DEG = -60;
@@ -76,6 +81,7 @@ try {
 let viewer;
 let centerlineLatLon = [];  // real-world [lon, lat] pairs, from Munich data
 let carFrames = [];         // OpenF1 position samples, in arrival order
+let trackPolylineEntity = null;
 
 async function init() {
   log("Setting up Cesium viewer...");
@@ -89,26 +95,20 @@ async function init() {
 
   try {
     await Promise.all([loadMunichCenterline(), loadOpenF1Data()]);
-    mapCarTelemetryToRealWorld();
-    buildLapBuffers();
-
-    // Track polyline, drawn on the satellite imagery so rotation/anchor
-    // can be checked by eye — does the yellow line sit on real tarmac?
-    viewer.entities.add({
-      polyline: {
-        positions: centerlineCartesians,
-        width: 4,
-        material: Cesium.Color.fromCssColorString("#E8FF00"),
-        clampToGround: true,
-      },
-    });
+    recomputeGeometry();
 
     log("Data loaded. Position samples: " + carFrames.length +
         " | Centerline points: " + centerlineLatLon.length +
         " | Ghost buffer laps: " + lapBuffers.length +
-        "\nTap Overview to check alignment, or Play next lap.");
+        "\nDrag Rotation to match the track, tap Overview to check, or Play next lap.");
+
     document.getElementById("playBtn").onclick = () => playLap();
     document.getElementById("overviewBtn").onclick = () => showOverview();
+    document.getElementById("rotSlider").oninput = (e) => {
+      ROTATION_OFFSET_DEG = Number(e.target.value);
+      document.getElementById("rotVal").textContent = ROTATION_OFFSET_DEG;
+      recomputeGeometry();
+    };
   } catch (err) {
     log("FAILED: " + err.message + "\n\nCheck the setup step at the top of this file.");
     console.error(err);
@@ -116,8 +116,7 @@ async function init() {
 }
 
 // Flies straight above the whole track so the entire yellow polyline is
-// visible against the satellite imagery in one shot — much faster way
-// to check rotation/anchor alignment than watching the chase camera.
+// visible against the satellite imagery in one shot.
 function showOverview() {
   const sphere = Cesium.BoundingSphere.fromPoints(centerlineCartesians);
   viewer.camera.flyToBoundingSphere(sphere, {
@@ -143,23 +142,39 @@ async function loadMunichCenterline() {
     const [x, y] = line.split(",").map(Number);
     return { x_m: x, y_m: y };
   });
+}
 
+// Rebuilds all rotation-dependent geometry (track line, headings, car
+// telemetry, ghost buffers) from the current ROTATION_OFFSET_DEG value.
+// Called once at load, then again live every time the slider moves.
+function recomputeGeometry() {
   const x0 = centerlineLatLon[0].x_m;
   const y0 = centerlineLatLon[0].y_m;
   const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 0);
   const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
+
   centerlineCartesians = centerlineLatLon.map(pt => {
     const r = rotateXY(pt.x_m - x0, pt.y_m - y0, ROTATION_OFFSET_DEG);
-    const localOffset = new Cesium.Cartesian3(r.x, r.y, 0);
-    return Cesium.Matrix4.multiplyByPoint(enuMatrix, localOffset, new Cesium.Cartesian3());
+    return Cesium.Matrix4.multiplyByPoint(enuMatrix, new Cesium.Cartesian3(r.x, r.y, 0), new Cesium.Cartesian3());
   });
 
   centerlineHeadings = centerlineLatLon.map((pt, i) => {
     const next = centerlineLatLon[(i + 1) % centerlineLatLon.length];
-    const dx = next.x_m - pt.x_m;
-    const dy = next.y_m - pt.y_m;
-    const r = rotateXY(dx, dy, ROTATION_OFFSET_DEG);
+    const r = rotateXY(next.x_m - pt.x_m, next.y_m - pt.y_m, ROTATION_OFFSET_DEG);
     return Math.atan2(r.x, r.y);
+  });
+
+  mapCarTelemetryToRealWorld();
+  buildLapBuffers();
+
+  if (trackPolylineEntity) viewer.entities.remove(trackPolylineEntity);
+  trackPolylineEntity = viewer.entities.add({
+    polyline: {
+      positions: centerlineCartesians,
+      width: 4,
+      material: Cesium.Color.fromCssColorString("#E8FF00"),
+      clampToGround: true,
+    },
   });
 }
 
@@ -198,8 +213,7 @@ function mapCarTelemetryToRealWorld() {
   const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
   carCartesiansAll = carFrames.map(f => {
     const r = rotateXY(f.x - x0, f.y - y0, ROTATION_OFFSET_DEG);
-    const localOffset = new Cesium.Cartesian3(r.x, r.y, 0);
-    return Cesium.Matrix4.multiplyByPoint(enuMatrix, localOffset, new Cesium.Cartesian3());
+    return Cesium.Matrix4.multiplyByPoint(enuMatrix, new Cesium.Cartesian3(r.x, r.y, 0), new Cesium.Cartesian3());
   });
 }
 
