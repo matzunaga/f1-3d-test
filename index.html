@@ -102,7 +102,7 @@ async function loadMunichCenterline() {
 
   const x0 = centerlineLatLon[0].x_m;
   const y0 = centerlineLatLon[0].y_m;
-  const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 500);
+  const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 0);
   const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
   centerlineCartesians = centerlineLatLon.map(pt => {
     const localOffset = new Cesium.Cartesian3(pt.x_m - x0, pt.y_m - y0, 0);
@@ -158,7 +158,7 @@ let liveCarEntity = null;
 function mapCarTelemetryToRealWorld() {
   const x0 = carFrames[0].x;
   const y0 = carFrames[0].y;
-  const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 500);
+  const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 0);
   const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
   carCartesiansAll = carFrames.map(f => {
     const localOffset = new Cesium.Cartesian3(f.x - x0, f.y - y0, 0);
@@ -249,7 +249,7 @@ function playLap() {
     const pos = centerlineCartesians[i];
     const next = centerlineCartesians[(i + 1) % total];
     viewer.camera.setView({
-      destination: pos,
+      destination: Cesium.Cartesian3.add(pos, Cesium.Cartesian3.multiplyByScalar(Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3()), 40, new Cesium.Cartesian3()), new Cesium.Cartesian3()),
       orientation: {
         direction: Cesium.Cartesian3.normalize(
           Cesium.Cartesian3.subtract(next, pos, new Cesium.Cartesian3()),
