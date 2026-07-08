@@ -249,7 +249,7 @@ function playLap() {
     const pos = centerlineCartesians[i];
     const next = centerlineCartesians[(i + 1) % total];
     viewer.camera.setView({
-      destination: Cesium.Cartesian3.add(pos, Cesium.Cartesian3.multiplyByScalar(Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3()), 40, new Cesium.Cartesian3()), new Cesium.Cartesian3()),
+      destination: Cesium.Cartesian3.add(pos, Cesium.Cartesian3.multiplyByScalar(Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3()), 80, new Cesium.Cartesian3()), new Cesium.Cartesian3()),
       orientation: {
         direction: Cesium.Cartesian3.normalize(
           Cesium.Cartesian3.subtract(next, pos, new Cesium.Cartesian3()),
