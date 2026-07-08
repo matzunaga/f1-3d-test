@@ -2,11 +2,12 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>F1 3D v0 test — Silverstone, real telemetry, ghost laps</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.120.0/Cesium.js"></script>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.120.0/Widgets/widgets.css" rel="stylesheet">
 <style>
-  html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
+  html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; touch-action: none; }
   #status { position: absolute; top: 10px; left: 10px; z-index: 999; background: #0D0D0D; color: #E8FF00;
             font-family: monospace; font-size: 13px; padding: 10px 14px; max-width: 480px; white-space: pre-wrap; }
   #controls { position: absolute; bottom: 14px; left: 14px; z-index: 999; display: flex; flex-wrap: wrap;
@@ -26,6 +27,10 @@
   <label id="rotWrap">
     Rotation: <span id="rotVal">0</span>°
     <input id="rotSlider" type="range" min="0" max="359" value="0">
+  </label>
+  <label id="rotWrap">
+    Zoom: <span id="zoomVal">1.0</span>x
+    <input id="zoomSlider" type="range" min="30" max="400" value="100">
   </label>
 </div>
 <div id="cesiumContainer"></div>
@@ -53,6 +58,13 @@ let ROTATION_OFFSET_DEG = 0;
 const HEIGHT_ABOVE_TRACK = 150;
 const DISTANCE_BEHIND = 60;
 const CAMERA_PITCH_DEG = -60;
+
+// Zoom multiplier, driven by the Zoom slider. playLap() forces the
+// camera to an exact position every frame — pinch-to-zoom gestures were
+// getting silently overridden the very next frame, which felt like
+// "fighting." This slider is read inside that same per-frame update
+// instead, so zoom actually sticks during playback.
+let zoomMultiplier = 1.0;
 
 function rotateXY(dx, dy, angleDeg) {
   const rad = Cesium.Math.toRadians(angleDeg);
@@ -108,6 +120,10 @@ async function init() {
       ROTATION_OFFSET_DEG = Number(e.target.value);
       document.getElementById("rotVal").textContent = ROTATION_OFFSET_DEG;
       recomputeGeometry();
+    };
+    document.getElementById("zoomSlider").oninput = (e) => {
+      zoomMultiplier = Number(e.target.value) / 100;
+      document.getElementById("zoomVal").textContent = zoomMultiplier.toFixed(1);
     };
   } catch (err) {
     log("FAILED: " + err.message + "\n\nCheck the setup step at the top of this file.");
@@ -302,10 +318,10 @@ function playLap() {
     const cameraPos = Cesium.Cartesian3.add(
       Cesium.Cartesian3.add(
         pos,
-        Cesium.Cartesian3.multiplyByScalar(forward, -DISTANCE_BEHIND, new Cesium.Cartesian3()),
+        Cesium.Cartesian3.multiplyByScalar(forward, -DISTANCE_BEHIND * zoomMultiplier, new Cesium.Cartesian3()),
         new Cesium.Cartesian3()
       ),
-      Cesium.Cartesian3.multiplyByScalar(groundNormal, HEIGHT_ABOVE_TRACK, new Cesium.Cartesian3()),
+      Cesium.Cartesian3.multiplyByScalar(groundNormal, HEIGHT_ABOVE_TRACK * zoomMultiplier, new Cesium.Cartesian3()),
       new Cesium.Cartesian3()
     );
     viewer.camera.setView({
