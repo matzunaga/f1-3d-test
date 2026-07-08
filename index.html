@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>F1 3D v0 test — Silverstone, real telemetry, ghost laps</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.120.0/Cesium.js"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.120.0/Widgets/widgets.css" rel="stylesheet">
+<style>
+  html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
+  #status { position: absolute; top: 10px; left: 10px; z-index: 999; background: #0D0D0D; color: #E8FF00;
+            font-family: monospace; font-size: 13px; padding: 10px 14px; max-width: 480px; white-space: pre-wrap; }
+  #controls { position: absolute; bottom: 10px; left: 10px; z-index: 999; }
+  button { background:#0D0D0D; color:#F0EDE6; border:1px solid #E8FF00; padding:8px 14px; font-family:monospace; cursor:pointer; }
+</style>
+</head>
+<body>
+<div id="status">Loading...</div>
+<div id="controls"><button id="playBtn">Play next lap</button></div>
+<div id="cesiumContainer"></div>
+
+<script>
+/* ============================================================
+   BEFORE THIS RUNS:
+
+   Paste your Cesium ion token below where it says
+   YOUR_CESIUM_ION_TOKEN. Get one (or a fresh one, if the old
+   one was rotated) at ion.cesium.com -> Access Tokens.
+   Never commit a real token to this file in a public repo —
+   paste it locally only, or wire it through Netlify env vars
+   if this needs to work on the deployed site.
+   ============================================================ */
+
+const CESIUM_ION_TOKEN = "YOUR_CESIUM_ION_TOKEN";
+
+const MUNICH_CENTERLINE_URL = "https://raw.githubusercontent.com/TUMFTM/racetrack-database/master/tracks/Silverstone.csv";
+
+const statusEl = document.getElementById("status");
+function log(msg) {
+  console.log(msg);
+  statusEl.textContent = msg;
+}
+
+try {
+  if (typeof Cesium === "undefined") {
+    throw new Error("Cesium library never loaded — likely a slow or blocked connection to cdnjs.cloudflare.com. Try reloading, or switch networks (wifi vs cellular).");
+  }
+  Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
+} catch (err) {
+  statusEl.textContent = "FAILED before setup: " + err.message;
+  throw err;
+}
+
+let viewer;
+let centerlineLatLon = [];  // real-world [lon, lat] pairs, from Munich data
+let carFrames = [];         // OpenF1 position samples, in arrival order
+
+async function init() {
+  log("Setting up Cesium viewer...");
+  viewer = new Cesium.Viewer("cesiumContainer", {
+    terrain: Cesium.Terrain.fromWorldTerrain(),
+    baseLayerPicker: false,
+    timeline: false,
+    animation: false,
+  });
+  viewer.scene.primitives.add(await Cesium.createOsmBuildingsAsync());
+
+  try {
+    await Promise.all([loadMunichCenterline(), loadOpenF1Data()]);
+    mapCarTelemetryToRealWorld();
+    buildLapBuffers();
+    log("Data loaded. Position samples: " + carFrames.length +
+        " | Centerline points: " + centerlineLatLon.length +
+        " | Ghost buffer laps: " + lapBuffers.length +
+        "\nPress Play next lap.");
+    document.getElementById("playBtn").onclick = () => playLap();
+  } catch (err) {
+    log("FAILED: " + err.message + "\n\nCheck the setup step at the top of this file.");
+    console.error(err);
+  }
+}
+
+// --- Step 1: real track geometry (Munich database) ---
+// ANCHOR: Silverstone's real-world coordinates, confirmed via multiple
+// sources. Local file meters get placed against this real point.
+const ANCHOR_LAT = 52.0717;
+const ANCHOR_LON = -1.0159;
+// NOTE: the rotation between the local file's x/y grid and true
+// east/north is NOT confirmed — x is being treated as east-meters and
+// y as north-meters as a first guess. If the track shape looks rotated
+// wrong once this loads, that's the next thing to fix, not a bug.
+let centerlineCartesians = [];
+
+async function loadMunichCenterline() {
+  const res = await fetch(MUNICH_CENTERLINE_URL);
+  if (!res.ok) throw new Error("Munich centerline fetch failed (" + res.status + "). Check the filename — see comment at top of file.");
+  const text = await res.text();
+  const lines = text.trim().split("\n").filter(l => !l.startsWith("#"));
+  centerlineLatLon = lines.map(line => {
+    const [x, y] = line.split(",").map(Number);
+    return { x_m: x, y_m: y };
+  });
+
+  const x0 = centerlineLatLon[0].x_m;
+  const y0 = centerlineLatLon[0].y_m;
+  const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 500);
+  const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
+  centerlineCartesians = centerlineLatLon.map(pt => {
+    const localOffset = new Cesium.Cartesian3(pt.x_m - x0, pt.y_m - y0, 0);
+    return Cesium.Matrix4.multiplyByPoint(enuMatrix, localOffset, new Cesium.Cartesian3());
+  });
+}
+
+// --- Step 2: real car telemetry (OpenF1) ---
+async function loadOpenF1Data() {
+  // v0 goal: prove the pipeline, not track a specific driver — so this
+  // grabs whichever race session comes back for Silverstone/Great Britain
+  // and just takes the first driver with data. Swap back to a specific
+  // driver/session once the mapping itself is proven to work.
+  const sessRes = await fetch("https://api.openf1.org/v1/sessions?country_name=United Kingdom&year=2026&session_type=Race");
+  const sessions = await sessRes.json();
+  if (!sessions.length) throw new Error("No 2026 Great Britain race session found in OpenF1.");
+  const sessionKey = sessions[0].session_key;
+
+  const drvRes = await fetch(`https://api.openf1.org/v1/drivers?session_key=${sessionKey}`);
+  const drivers = await drvRes.json();
+  if (!drivers.length) throw new Error("No drivers found for this session.");
+  const driver = drivers[0];
+
+  const locRes = await fetch(`https://api.openf1.org/v1/location?session_key=${sessionKey}&driver_number=${driver.driver_number}`);
+  carFrames = await locRes.json();
+  if (!carFrames.length) throw new Error("No location data returned for driver " + driver.driver_number + ".");
+}
+
+// --- Step 3: GHOST BUFFER ---
+// Architecture (per the original design): record every sample during a lap,
+// keyed by normalized track position, so a ghost lines up with where the
+// live car actually was at that point on track — not a stale frame count.
+//
+// v0 SIMPLIFICATION, stated plainly: OpenF1's location feed for a race
+// session is one long stream with no lap-boundary field in this endpoint
+// (that lives in OpenF1's separate /laps endpoint, not wired in yet).
+// So this chunks the stream into REAL_LAP_COUNT_V0 equal-length pieces and
+// treats each as "a lap" to prove the buffer/playback mechanics end to end.
+// Swap in real lap boundaries from /v1/laps once this is confirmed working.
+const REAL_LAP_COUNT_V0 = 5;
+const SAMPLES_PER_LAP = 300;   // normalized resolution of the ghost buffer
+const MAX_GHOSTS = 4;
+
+let carCartesiansAll = [];  // ALL telemetry points, real-world anchored
+let lapBuffers = [];        // array of laps, each SAMPLES_PER_LAP long
+let currentLapIndex = 0;
+let ghostEntities = [];
+let liveCarEntity = null;
+
+// Car telemetry gets anchored the same way the centerline does — same
+// anchor point, same ENU transform — so the two line up in the same
+// real-world coordinate frame instead of two separate local grids.
+function mapCarTelemetryToRealWorld() {
+  const x0 = carFrames[0].x;
+  const y0 = carFrames[0].y;
+  const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 500);
+  const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
+  carCartesiansAll = carFrames.map(f => {
+    const localOffset = new Cesium.Cartesian3(f.x - x0, f.y - y0, 0);
+    return Cesium.Matrix4.multiplyByPoint(enuMatrix, localOffset, new Cesium.Cartesian3());
+  });
+}
+
+function buildLapBuffers() {
+  const perLap = Math.floor(carCartesiansAll.length / REAL_LAP_COUNT_V0);
+  lapBuffers = [];
+  for (let lap = 0; lap < REAL_LAP_COUNT_V0; lap++) {
+    const start = lap * perLap;
+    const chunk = carCartesiansAll.slice(start, start + perLap);
+    lapBuffers.push(resampleToFixedSteps(chunk, SAMPLES_PER_LAP));
+  }
+}
+
+// Normalizes a variable-length chunk into exactly `steps` points, evenly
+// spaced by index fraction through the chunk — same index-fraction
+// convention already used for the centerline camera path. This is what
+// makes O(1) ghost lookup by track-progress fraction possible.
+function resampleToFixedSteps(points, steps) {
+  if (points.length < 2) {
+    const fallback = points[0] || Cesium.Cartesian3.ZERO;
+    return new Array(steps).fill(fallback);
+  }
+  const out = [];
+  for (let i = 0; i < steps; i++) {
+    const t = (i / (steps - 1)) * (points.length - 1);
+    const i0 = Math.floor(t);
+    const i1 = Math.min(i0 + 1, points.length - 1);
+    const frac = t - i0;
+    out.push(Cesium.Cartesian3.lerp(points[i0], points[i1], frac, new Cesium.Cartesian3()));
+  }
+  return out;
+}
+
+function clearGhostEntities() {
+  ghostEntities.forEach(e => viewer.entities.remove(e));
+  ghostEntities = [];
+  if (liveCarEntity) {
+    viewer.entities.remove(liveCarEntity);
+    liveCarEntity = null;
+  }
+}
+
+// --- Step 4: playback — camera flythrough + live car + ghost laps ---
+function playLap() {
+  if (!centerlineCartesians.length || !lapBuffers.length) { log("Data not ready — can't play."); return; }
+  clearGhostEntities();
+
+  // Ghosts are every PREVIOUSLY played lap, capped at MAX_GHOSTS, most
+  // recent first. Older ghosts fade out — 1 - age*0.22, floored at 0.15.
+  const ghostLapIndices = [];
+  for (let g = currentLapIndex - 1; g >= 0 && ghostLapIndices.length < MAX_GHOSTS; g--) {
+    ghostLapIndices.push(g);
+  }
+
+  ghostEntities = ghostLapIndices.map((lapIdx, order) => {
+    const age = order + 1;
+    return viewer.entities.add({
+      point: {
+        pixelSize: 10,
+        color: Cesium.Color.fromCssColorString("#E8FF00").withAlpha(Math.max(0.15, 1 - age * 0.22)),
+      },
+      position: lapBuffers[lapIdx][0],
+    });
+  });
+
+  liveCarEntity = viewer.entities.add({
+    point: { pixelSize: 14, color: Cesium.Color.fromCssColorString("#FF3C3C") },
+    position: centerlineCartesians[0],
+  });
+
+  const total = centerlineCartesians.length;
+  let i = 0;
+  log("Playing lap " + (currentLapIndex + 1) + " of " + REAL_LAP_COUNT_V0 +
+      " — " + ghostLapIndices.length + " ghost(s) trailing.");
+
+  const interval = setInterval(() => {
+    if (i >= total) {
+      clearInterval(interval);
+      currentLapIndex = (currentLapIndex + 1) % REAL_LAP_COUNT_V0;
+      log("Lap complete. Press Play next lap to continue — " +
+          Math.min(currentLapIndex, MAX_GHOSTS) + " ghost(s) will trail next time.");
+      return;
+    }
+    const pos = centerlineCartesians[i];
+    const next = centerlineCartesians[(i + 1) % total];
+    viewer.camera.setView({
+      destination: pos,
+      orientation: {
+        direction: Cesium.Cartesian3.normalize(
+          Cesium.Cartesian3.subtract(next, pos, new Cesium.Cartesian3()),
+          new Cesium.Cartesian3()
+        ),
+        up: Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3()),
+      },
+    });
+    liveCarEntity.position = pos;
+
+    // Ghost playback: same track-progress fraction, looked up in each
+    // stored lap buffer. This is the actual ghost mechanic — position by
+    // progress, not by frame count.
+    const progressFrac = i / (total - 1);
+    ghostEntities.forEach((entity, idx) => {
+      const buf = lapBuffers[ghostLapIndices[idx]];
+      const gi = Math.min(Math.round(progressFrac * (buf.length - 1)), buf.length - 1);
+      entity.position = buf[gi];
+    });
+
+    i += 1;
+  }, 50);
+}
+
+init();
+</script>
+</body>
+</html>
