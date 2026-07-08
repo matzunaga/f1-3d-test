@@ -248,10 +248,32 @@ function playLap() {
     // at some track points (near-parallel vectors) and caused the
     // black/terrain flicker. lookAt() with heading/pitch/range is stable
     // and always aims down at the track from behind, using it as a guide.
-    viewer.camera.lookAt(
-      pos,
-      new Cesium.HeadingPitchRange(centerlineHeadings[i], Cesium.Math.toRadians(-35), 80)
-    );
+    const nextPos = centerlineCartesians[(i + 1) % total];
+const forward = Cesium.Cartesian3.normalize(
+  Cesium.Cartesian3.subtract(nextPos, pos, new Cesium.Cartesian3()),
+  new Cesium.Cartesian3()
+);
+const groundNormal = Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3());
+const HEIGHT_ABOVE_TRACK = 40;   // meters up — raise this for more "bird" feel
+const DISTANCE_BEHIND = 60;      // meters back from the car
+const cameraPos = Cesium.Cartesian3.add(
+  Cesium.Cartesian3.add(
+    pos,
+    Cesium.Cartesian3.multiplyByScalar(forward, -DISTANCE_BEHIND, new Cesium.Cartesian3()),
+    new Cesium.Cartesian3()
+  ),
+  Cesium.Cartesian3.multiplyByScalar(groundNormal, HEIGHT_ABOVE_TRACK, new Cesium.Cartesian3()),
+  new Cesium.Cartesian3()
+);
+viewer.camera.setView({
+  destination: cameraPos,
+  orientation: {
+    heading: centerlineHeadings[i],
+    pitch: Cesium.Math.toRadians(-45),   // steeper = more top-down/bird-like
+    roll: 0,
+  },
+});
+
 
     liveCarEntity.position = pos;
 
