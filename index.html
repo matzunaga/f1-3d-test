@@ -9,13 +9,16 @@
   html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
   #status { position: absolute; top: 10px; left: 10px; z-index: 999; background: #0D0D0D; color: #E8FF00;
             font-family: monospace; font-size: 13px; padding: 10px 14px; max-width: 480px; white-space: pre-wrap; }
-  #controls { position: absolute; bottom: 10px; left: 10px; z-index: 999; }
+  #controls { position: absolute; bottom: 10px; left: 10px; z-index: 999; display: flex; gap: 8px; }
   button { background:#0D0D0D; color:#F0EDE6; border:1px solid #E8FF00; padding:8px 14px; font-family:monospace; cursor:pointer; }
 </style>
 </head>
 <body>
 <div id="status">Loading...</div>
-<div id="controls"><button id="playBtn">Play next lap</button></div>
+<div id="controls">
+  <button id="playBtn">Play next lap</button>
+  <button id="overviewBtn">Overview (top-down)</button>
+</div>
 <div id="cesiumContainer"></div>
 
 <script>
@@ -30,18 +33,19 @@
    if this needs to work on the deployed site.
    ============================================================ */
 
-const CESIUM_ION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJmYjU2ZGRhNy00YzFlLTRlNmItYjIyZC02NGVkZTE3NDVkNWEiLCJpZCI6NDUzNTM3LCJzdWIiOiJNYXR6dW5hZ2EiLCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoiRjEgdGVzdGluZyAiLCJpYXQiOjE3ODM1MjA2OTd9.YKRKC1nre1fGJqU5NhdN6YFPVpMGzxW1sMuRrOY15yQ";
+const CESIUM_ION_TOKEN = "YOUR_CESIUM_ION_TOKEN";
 
 const MUNICH_CENTERLINE_URL = "https://raw.githubusercontent.com/TUMFTM/racetrack-database/master/tracks/Silverstone.csv";
 
-// TUNE THESE TWO BY EYE, in order:
-// 1. ROTATION_OFFSET_DEG — steps of 15 or 30 until the yellow track line
-//    (added below) sits on the real tarmac in the satellite imagery
-//    instead of off to the side.
-// 2. HEIGHT_ABOVE_TRACK / CAMERA_PITCH_DEG — camera framing, once the
-//    rotation is correct and the track is actually visible.
-const ROTATION_OFFSET_DEG = 90;
-const HEIGHT_ABOVE_TRACK = 500;
+// TUNE THESE BY EYE:
+// 1. Tap "Overview" first — flies straight above the whole track so you
+//    can see if the yellow line matches the real tarmac shape at a glance.
+// 2. ROTATION_OFFSET_DEG — try 0, 90, 180, 270 first (cheap survey data
+//    is almost always aligned to a clean multiple of true north).
+// 3. HEIGHT_ABOVE_TRACK / CAMERA_PITCH_DEG — chase-cam framing, once the
+//    rotation is confirmed correct in the Overview.
+const ROTATION_OFFSET_DEG = 0;
+const HEIGHT_ABOVE_TRACK = 150;
 const DISTANCE_BEHIND = 60;
 const CAMERA_PITCH_DEG = -60;
 
@@ -102,12 +106,24 @@ async function init() {
     log("Data loaded. Position samples: " + carFrames.length +
         " | Centerline points: " + centerlineLatLon.length +
         " | Ghost buffer laps: " + lapBuffers.length +
-        "\nPress Play next lap.");
+        "\nTap Overview to check alignment, or Play next lap.");
     document.getElementById("playBtn").onclick = () => playLap();
+    document.getElementById("overviewBtn").onclick = () => showOverview();
   } catch (err) {
     log("FAILED: " + err.message + "\n\nCheck the setup step at the top of this file.");
     console.error(err);
   }
+}
+
+// Flies straight above the whole track so the entire yellow polyline is
+// visible against the satellite imagery in one shot — much faster way
+// to check rotation/anchor alignment than watching the chase camera.
+function showOverview() {
+  const sphere = Cesium.BoundingSphere.fromPoints(centerlineCartesians);
+  viewer.camera.flyToBoundingSphere(sphere, {
+    offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-90), sphere.radius * 2.5),
+    duration: 1.5,
+  });
 }
 
 // --- Step 1: real track geometry (Munich database) ---
@@ -130,8 +146,6 @@ async function loadMunichCenterline() {
 
   const x0 = centerlineLatLon[0].x_m;
   const y0 = centerlineLatLon[0].y_m;
-  // Ground level (0), not 500 — that height was only ever meant for an
-  // overview camera shot, not as the coordinate anchor for the track.
   const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 0);
   const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
   centerlineCartesians = centerlineLatLon.map(pt => {
@@ -140,9 +154,6 @@ async function loadMunichCenterline() {
     return Cesium.Matrix4.multiplyByPoint(enuMatrix, localOffset, new Cesium.Cartesian3());
   });
 
-  // Track heading per point, used for camera aim — computed once here
-  // instead of raw per-frame vector math, which went degenerate at some
-  // points and caused flicker in an earlier version.
   centerlineHeadings = centerlineLatLon.map((pt, i) => {
     const next = centerlineLatLon[(i + 1) % centerlineLatLon.length];
     const dx = next.x_m - pt.x_m;
@@ -269,9 +280,6 @@ function playLap() {
     const pos = centerlineCartesians[i];
     const nextPos = centerlineCartesians[(i + 1) % total];
 
-    // Explicit camera position — behind and above the car, aimed with
-    // heading/pitch. This replaced camera.lookAt(), which put the
-    // camera inside the terrain mesh (all-black render, red dot only).
     const forward = Cesium.Cartesian3.normalize(
       Cesium.Cartesian3.subtract(nextPos, pos, new Cesium.Cartesian3()),
       new Cesium.Cartesian3()
