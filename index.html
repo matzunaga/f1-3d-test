@@ -89,6 +89,7 @@ const ANCHOR_LON = -1.0159;
 // y as north-meters as a first guess. If the track shape looks rotated
 // wrong once this loads, that's the next thing to fix, not a bug.
 let centerlineCartesians = [];
+let centerlineHeadings = [];  // per-point track heading, radians, for camera aim
 
 async function loadMunichCenterline() {
   const res = await fetch(MUNICH_CENTERLINE_URL);
@@ -102,11 +103,25 @@ async function loadMunichCenterline() {
 
   const x0 = centerlineLatLon[0].x_m;
   const y0 = centerlineLatLon[0].y_m;
+  // HEIGHT FIX: was 500 (meant for an overview camera shot), which put
+  // the whole track 500m above real ground since this anchor doubles as
+  // the coordinate origin. 0 = ground level, correct for the track itself.
   const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 0);
   const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
   centerlineCartesians = centerlineLatLon.map(pt => {
     const localOffset = new Cesium.Cartesian3(pt.x_m - x0, pt.y_m - y0, 0);
     return Cesium.Matrix4.multiplyByPoint(enuMatrix, localOffset, new Cesium.Cartesian3());
+  });
+
+  // Track heading per point, used by camera.lookAt() so the chase cam
+  // always faces along the track instead of computing raw direction
+  // vectors every frame (that approach went degenerate at some points
+  // and caused the black/terrain flicker).
+  centerlineHeadings = centerlineLatLon.map((pt, i) => {
+    const next = centerlineLatLon[(i + 1) % centerlineLatLon.length];
+    const dx = next.x_m - pt.x_m;
+    const dy = next.y_m - pt.y_m;
+    return Math.atan2(dx, dy);
   });
 }
 
@@ -132,29 +147,16 @@ async function loadOpenF1Data() {
 }
 
 // --- Step 3: GHOST BUFFER ---
-// Architecture (per the original design): record every sample during a lap,
-// keyed by normalized track position, so a ghost lines up with where the
-// live car actually was at that point on track — not a stale frame count.
-//
-// v0 SIMPLIFICATION, stated plainly: OpenF1's location feed for a race
-// session is one long stream with no lap-boundary field in this endpoint
-// (that lives in OpenF1's separate /laps endpoint, not wired in yet).
-// So this chunks the stream into REAL_LAP_COUNT_V0 equal-length pieces and
-// treats each as "a lap" to prove the buffer/playback mechanics end to end.
-// Swap in real lap boundaries from /v1/laps once this is confirmed working.
 const REAL_LAP_COUNT_V0 = 5;
-const SAMPLES_PER_LAP = 300;   // normalized resolution of the ghost buffer
+const SAMPLES_PER_LAP = 300;
 const MAX_GHOSTS = 4;
 
-let carCartesiansAll = [];  // ALL telemetry points, real-world anchored
-let lapBuffers = [];        // array of laps, each SAMPLES_PER_LAP long
+let carCartesiansAll = [];
+let lapBuffers = [];
 let currentLapIndex = 0;
 let ghostEntities = [];
 let liveCarEntity = null;
 
-// Car telemetry gets anchored the same way the centerline does — same
-// anchor point, same ENU transform — so the two line up in the same
-// real-world coordinate frame instead of two separate local grids.
 function mapCarTelemetryToRealWorld() {
   const x0 = carFrames[0].x;
   const y0 = carFrames[0].y;
@@ -176,10 +178,6 @@ function buildLapBuffers() {
   }
 }
 
-// Normalizes a variable-length chunk into exactly `steps` points, evenly
-// spaced by index fraction through the chunk — same index-fraction
-// convention already used for the centerline camera path. This is what
-// makes O(1) ghost lookup by track-progress fraction possible.
 function resampleToFixedSteps(points, steps) {
   if (points.length < 2) {
     const fallback = points[0] || Cesium.Cartesian3.ZERO;
@@ -210,8 +208,6 @@ function playLap() {
   if (!centerlineCartesians.length || !lapBuffers.length) { log("Data not ready — can't play."); return; }
   clearGhostEntities();
 
-  // Ghosts are every PREVIOUSLY played lap, capped at MAX_GHOSTS, most
-  // recent first. Older ghosts fade out — 1 - age*0.22, floored at 0.15.
   const ghostLapIndices = [];
   for (let g = currentLapIndex - 1; g >= 0 && ghostLapIndices.length < MAX_GHOSTS; g--) {
     ghostLapIndices.push(g);
@@ -247,22 +243,18 @@ function playLap() {
       return;
     }
     const pos = centerlineCartesians[i];
-    const next = centerlineCartesians[(i + 1) % total];
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.add(pos, Cesium.Cartesian3.multiplyByScalar(Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3()), 80, new Cesium.Cartesian3()), new Cesium.Cartesian3()),
-      orientation: {
-        direction: Cesium.Cartesian3.normalize(
-          Cesium.Cartesian3.subtract(next, pos, new Cesium.Cartesian3()),
-          new Cesium.Cartesian3()
-        ),
-        up: Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3()),
-      },
-    });
+
+    // CAMERA FIX: was raw direction/up vector math, which went degenerate
+    // at some track points (near-parallel vectors) and caused the
+    // black/terrain flicker. lookAt() with heading/pitch/range is stable
+    // and always aims down at the track from behind, using it as a guide.
+    viewer.camera.lookAt(
+      pos,
+      new Cesium.HeadingPitchRange(centerlineHeadings[i], Cesium.Math.toRadians(-35), 80)
+    );
+
     liveCarEntity.position = pos;
 
-    // Ghost playback: same track-progress fraction, looked up in each
-    // stored lap buffer. This is the actual ghost mechanic — position by
-    // progress, not by frame count.
     const progressFrac = i / (total - 1);
     ghostEntities.forEach((entity, idx) => {
       const buf = lapBuffers[ghostLapIndices[idx]];
