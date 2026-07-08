@@ -40,6 +40,14 @@
     Shift N/S: <span id="panNVal">0</span>m
     <input id="panNSlider" type="range" min="-1000" max="1000" value="0">
   </label>
+  <label id="rotWrap">
+    Cam Height: <span id="camHVal">150</span>m
+    <input id="camHSlider" type="range" min="5" max="500" value="150">
+  </label>
+  <label id="rotWrap">
+    Cam Pitch: <span id="camPVal">-60</span>°
+    <input id="camPSlider" type="range" min="-90" max="-5" value="-60">
+  </label>
 </div>
 <div id="cesiumContainer"></div>
 
@@ -63,9 +71,14 @@ const MUNICH_CENTERLINE_URL = "https://raw.githubusercontent.com/TUMFTM/racetrac
 // line redraws in real time against the satellite imagery. No more
 // edit-commit-redeploy-screenshot loops to find the right angle.
 let ROTATION_OFFSET_DEG = 0;
-const HEIGHT_ABOVE_TRACK = 150;
 const DISTANCE_BEHIND = 60;
-const CAMERA_PITCH_DEG = -60;
+
+// Camera height (meters above track) and pitch (degrees, 0 = level with
+// horizon, -90 = straight down) are now live sliders too, for the same
+// reason rotation/pan are: dialing these in by eye beats guessing a
+// constant and redeploying. playLap() reads these every frame.
+let cameraHeightM = 150;
+let cameraPitchDeg = -60;
 
 // Zoom multiplier, driven by the Zoom slider. playLap() forces the
 // camera to an exact position every frame — pinch-to-zoom gestures were
@@ -149,6 +162,14 @@ async function init() {
       panNorthM = Number(e.target.value);
       document.getElementById("panNVal").textContent = panNorthM;
       recomputeGeometry();
+    };
+    document.getElementById("camHSlider").oninput = (e) => {
+      cameraHeightM = Number(e.target.value);
+      document.getElementById("camHVal").textContent = cameraHeightM;
+    };
+    document.getElementById("camPSlider").oninput = (e) => {
+      cameraPitchDeg = Number(e.target.value);
+      document.getElementById("camPVal").textContent = cameraPitchDeg;
     };
   } catch (err) {
     log("FAILED: " + err.message + "\n\nCheck the setup step at the top of this file.");
@@ -294,8 +315,22 @@ function clearGhostEntities() {
 }
 
 // --- Step 4: playback — camera flythrough + live car + ghost laps ---
+let activePlaybackInterval = null;
+
 function playLap() {
   if (!centerlineCartesians.length || !lapBuffers.length) { log("Data not ready — can't play."); return; }
+
+  // Kill any prior playback loop (e.g. if Play next lap was tapped again
+  // while a lap was still running, or right after Overview) so we never
+  // have two intervals fighting over the camera.
+  if (activePlaybackInterval !== null) {
+    clearInterval(activePlaybackInterval);
+    activePlaybackInterval = null;
+  }
+  // Cancel any in-flight Overview camera fly so it can't finish and
+  // stomp the POV camera position a moment after playback starts.
+  viewer.camera.cancelFlight();
+
   clearGhostEntities();
 
   const ghostLapIndices = [];
@@ -324,9 +359,10 @@ function playLap() {
   log("Playing lap " + (currentLapIndex + 1) + " of " + REAL_LAP_COUNT_V0 +
       " — " + ghostLapIndices.length + " ghost(s) trailing.");
 
-  const interval = setInterval(() => {
+  activePlaybackInterval = setInterval(() => {
     if (i >= total) {
-      clearInterval(interval);
+      clearInterval(activePlaybackInterval);
+      activePlaybackInterval = null;
       currentLapIndex = (currentLapIndex + 1) % REAL_LAP_COUNT_V0;
       log("Lap complete. Press Play next lap to continue — " +
           Math.min(currentLapIndex, MAX_GHOSTS) + " ghost(s) will trail next time.");
@@ -346,14 +382,14 @@ function playLap() {
         Cesium.Cartesian3.multiplyByScalar(forward, -DISTANCE_BEHIND * zoomMultiplier, new Cesium.Cartesian3()),
         new Cesium.Cartesian3()
       ),
-      Cesium.Cartesian3.multiplyByScalar(groundNormal, HEIGHT_ABOVE_TRACK * zoomMultiplier, new Cesium.Cartesian3()),
+      Cesium.Cartesian3.multiplyByScalar(groundNormal, cameraHeightM * zoomMultiplier, new Cesium.Cartesian3()),
       new Cesium.Cartesian3()
     );
     viewer.camera.setView({
       destination: cameraPos,
       orientation: {
         heading: centerlineHeadings[i],
-        pitch: Cesium.Math.toRadians(CAMERA_PITCH_DEG),
+        pitch: Cesium.Math.toRadians(cameraPitchDeg),
         roll: 0,
       },
     });
