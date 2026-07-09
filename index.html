@@ -15,8 +15,15 @@
   button { background:#0D0D0D; color:#F0EDE6; border:1px solid #E8FF00; padding:14px 22px; font-family:monospace;
            font-size: 15px; cursor:pointer; border-radius: 4px; }
   button:hover { background:#1a1a1a; }
-  #rotWrap { color:#F0EDE6; font-family:monospace; font-size:14px; display:flex; align-items:center; gap:8px; }
-  #rotSlider { width: 220px; vertical-align: middle; }
+  #rotWrap { color:#F0EDE6; font-family:monospace; font-size:14px; display:flex; align-items:center; gap:4px; }
+  .stepBtn { background:#0D0D0D; color:#E8FF00; border:1px solid #E8FF00; width:36px; height:36px;
+             font-family:monospace; font-size:20px; line-height:1; cursor:pointer; border-radius:4px;
+             display:flex; align-items:center; justify-content:center; user-select:none; touch-action:manipulation; }
+  .stepBtn:active { background:#E8FF00; color:#0D0D0D; }
+  .stepInput { width:64px; height:34px; background:#1a1a1a; color:#F0EDE6; border:1px solid #3D3D3D;
+               font-family:monospace; font-size:15px; text-align:center; border-radius:4px; }
+  .stepInput:focus { outline:2px solid #E8FF00; border-color:#E8FF00; }
+  .stepLabel { min-width:88px; }
 </style>
 </head>
 <body>
@@ -24,29 +31,35 @@
 <div id="controls">
   <button id="playBtn">Play next lap</button>
   <button id="overviewBtn">Overview (top-down)</button>
-  <label id="rotWrap">
-    Rotation: <span id="rotVal">0</span>°
-    <input id="rotSlider" type="range" min="0" max="359" value="0">
+  <label id="rotWrap"><span class="stepLabel">Rotation</span>
+    <button class="stepBtn" data-ctl="rot" data-dir="-1">-</button>
+    <input class="stepInput" id="rotVal" type="number" inputmode="decimal" step="0.5" value="0">
+    <button class="stepBtn" data-ctl="rot" data-dir="1">+</button>&deg;
   </label>
-  <label id="rotWrap">
-    Zoom: <span id="zoomVal">1.0</span>x
-    <input id="zoomSlider" type="range" min="30" max="400" value="100">
+  <label id="rotWrap"><span class="stepLabel">Zoom</span>
+    <button class="stepBtn" data-ctl="zoom" data-dir="-1">-</button>
+    <input class="stepInput" id="zoomVal" type="number" inputmode="decimal" step="0.1" value="1.0">
+    <button class="stepBtn" data-ctl="zoom" data-dir="1">+</button>x
   </label>
-  <label id="rotWrap">
-    Shift E/W: <span id="panEVal">0</span>m
-    <input id="panESlider" type="range" min="-1000" max="1000" value="0">
+  <label id="rotWrap"><span class="stepLabel">Shift E/W</span>
+    <button class="stepBtn" data-ctl="panE" data-dir="-1">-</button>
+    <input class="stepInput" id="panEVal" type="number" inputmode="decimal" step="1" value="0">
+    <button class="stepBtn" data-ctl="panE" data-dir="1">+</button>m
   </label>
-  <label id="rotWrap">
-    Shift N/S: <span id="panNVal">0</span>m
-    <input id="panNSlider" type="range" min="-1000" max="1000" value="0">
+  <label id="rotWrap"><span class="stepLabel">Shift N/S</span>
+    <button class="stepBtn" data-ctl="panN" data-dir="-1">-</button>
+    <input class="stepInput" id="panNVal" type="number" inputmode="decimal" step="1" value="0">
+    <button class="stepBtn" data-ctl="panN" data-dir="1">+</button>m
   </label>
-  <label id="rotWrap">
-    Cam Height: <span id="camHVal">150</span>m
-    <input id="camHSlider" type="range" min="5" max="500" value="150">
+  <label id="rotWrap"><span class="stepLabel">Cam Height</span>
+    <button class="stepBtn" data-ctl="camH" data-dir="-1">-</button>
+    <input class="stepInput" id="camHVal" type="number" inputmode="decimal" step="1" value="150">
+    <button class="stepBtn" data-ctl="camH" data-dir="1">+</button>m
   </label>
-  <label id="rotWrap">
-    Cam Pitch: <span id="camPVal">-60</span>°
-    <input id="camPSlider" type="range" min="-90" max="-5" value="-60">
+  <label id="rotWrap"><span class="stepLabel">Cam Pitch</span>
+    <button class="stepBtn" data-ctl="camP" data-dir="-1">-</button>
+    <input class="stepInput" id="camPVal" type="number" inputmode="decimal" step="1" value="-60">
+    <button class="stepBtn" data-ctl="camP" data-dir="1">+</button>&deg;
   </label>
 </div>
 <div id="cesiumContainer"></div>
@@ -144,33 +157,64 @@ async function init() {
 
     document.getElementById("playBtn").onclick = () => playLap();
     document.getElementById("overviewBtn").onclick = () => showOverview();
-    document.getElementById("rotSlider").oninput = (e) => {
-      ROTATION_OFFSET_DEG = Number(e.target.value);
-      document.getElementById("rotVal").textContent = ROTATION_OFFSET_DEG;
-      recomputeGeometry();
+    // Each control is a tap-to-type number input flanked by - / + buttons.
+    // Sliders were nearly impossible to fine-tune with a fingertip on
+    // iPhone — a 1-pixel drag could be several meters or degrees. This
+    // lets you type an exact value, tap once for a small nudge, or
+    // press-and-hold a button to run through values quickly.
+    const controls = {
+      rot:  { min: 0,     max: 359, onChange: v => { ROTATION_OFFSET_DEG = v; recomputeGeometry(); } },
+      zoom: { min: 0.3,   max: 4.0, onChange: v => { zoomMultiplier = v; } },
+      panE: { min: -1000, max: 1000, onChange: v => { panEastM = v; recomputeGeometry(); } },
+      panN: { min: -1000, max: 1000, onChange: v => { panNorthM = v; recomputeGeometry(); } },
+      camH: { min: 5,     max: 500, onChange: v => { cameraHeightM = v; } },
+      camP: { min: -90,   max: -5,  onChange: v => { cameraPitchDeg = v; } },
     };
-    document.getElementById("zoomSlider").oninput = (e) => {
-      zoomMultiplier = Number(e.target.value) / 100;
-      document.getElementById("zoomVal").textContent = zoomMultiplier.toFixed(1);
-    };
-    document.getElementById("panESlider").oninput = (e) => {
-      panEastM = Number(e.target.value);
-      document.getElementById("panEVal").textContent = panEastM;
-      recomputeGeometry();
-    };
-    document.getElementById("panNSlider").oninput = (e) => {
-      panNorthM = Number(e.target.value);
-      document.getElementById("panNVal").textContent = panNorthM;
-      recomputeGeometry();
-    };
-    document.getElementById("camHSlider").oninput = (e) => {
-      cameraHeightM = Number(e.target.value);
-      document.getElementById("camHVal").textContent = cameraHeightM;
-    };
-    document.getElementById("camPSlider").oninput = (e) => {
-      cameraPitchDeg = Number(e.target.value);
-      document.getElementById("camPVal").textContent = cameraPitchDeg;
-    };
+    const idFor = { rot: "rotVal", zoom: "zoomVal", panE: "panEVal", panN: "panNVal", camH: "camHVal", camP: "camPVal" };
+
+    Object.keys(controls).forEach(ctl => {
+      const { min, max, onChange } = controls[ctl];
+      const input = document.getElementById(idFor[ctl]);
+      const step = Number(input.step) || 1;
+
+      const commit = (v) => {
+        v = Math.max(min, Math.min(max, v));
+        input.value = v;
+        onChange(v);
+      };
+      // Typing a value directly (blur or Enter commits it).
+      input.addEventListener("change", () => commit(Number(input.value) || 0));
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); });
+
+      // Tap = one step. Press-and-hold = repeats, speeding up after ~1s.
+      document.querySelectorAll(`.stepBtn[data-ctl="${ctl}"]`).forEach(btn => {
+        const dir = Number(btn.dataset.dir);
+        let repeatTimer = null, holdTimeout = null, ticks = 0;
+        const doStep = () => commit(Number(input.value) + dir * step);
+        const startHold = () => {
+          doStep();
+          holdTimeout = setTimeout(() => {
+            repeatTimer = setInterval(() => {
+              ticks++;
+              doStep();
+              if (ticks === 15 && repeatTimer) { // speed up after ~1.5s of holding
+                clearInterval(repeatTimer);
+                repeatTimer = setInterval(doStep, 60);
+              }
+            }, 100);
+          }, 400);
+        };
+        const stopHold = () => {
+          clearTimeout(holdTimeout);
+          clearInterval(repeatTimer);
+          repeatTimer = null; ticks = 0;
+        };
+        btn.addEventListener("pointerdown", (e) => { e.preventDefault(); startHold(); });
+        btn.addEventListener("pointerup", stopHold);
+        btn.addEventListener("pointerleave", stopHold);
+        btn.addEventListener("pointercancel", stopHold);
+      });
+    });
   } catch (err) {
     log("FAILED: " + err.message + "\n\nCheck the setup step at the top of this file.");
     console.error(err);
