@@ -241,10 +241,18 @@ function recomputeGeometry() {
 }
 
 // --- Step 2: real car telemetry (OpenF1) ---
+let lapBoundaries = [];  // [{lap_number, date_start}], sorted, real lap-line crossings
+
 async function loadOpenF1Data() {
-  const sessRes = await fetch("https://api.openf1.org/v1/sessions?country_name=United Kingdom&year=2026&session_type=Race");
+  // 2026 Silverstone was a Sprint weekend: OpenF1 tags BOTH the Sprint
+  // (Saturday) and the actual Grand Prix (Sunday) as session_type
+  // "Race". Filtering on session_type alone silently grabs whichever
+  // one the API lists first — which turned out to be the Sprint, not
+  // the anchored/validated Race (session key 11326). Match the exact
+  // session_name instead so this always resolves to the real race.
+  const sessRes = await fetch("https://api.openf1.org/v1/sessions?country_name=United Kingdom&year=2026&session_name=Race");
   const sessions = await sessRes.json();
-  if (!sessions.length) throw new Error("No 2026 Great Britain race session found in OpenF1.");
+  if (!sessions.length) throw new Error("No 2026 Great Britain Race session found in OpenF1 (checked session_name=Race).");
   const sessionKey = sessions[0].session_key;
 
   const drvRes = await fetch(`https://api.openf1.org/v1/drivers?session_key=${sessionKey}`);
@@ -255,10 +263,20 @@ async function loadOpenF1Data() {
   const locRes = await fetch(`https://api.openf1.org/v1/location?session_key=${sessionKey}&driver_number=${driver.driver_number}`);
   carFrames = await locRes.json();
   if (!carFrames.length) throw new Error("No location data returned for driver " + driver.driver_number + ".");
+
+  // Real lap boundaries (start-of-lap timestamps), not a guessed slice
+  // count. This is what makes lap breaks land on the actual start/
+  // finish line instead of an arbitrary fraction of the sample array.
+  const lapRes = await fetch(`https://api.openf1.org/v1/laps?session_key=${sessionKey}&driver_number=${driver.driver_number}`);
+  const laps = await lapRes.json();
+  lapBoundaries = laps
+    .filter(l => l.date_start)
+    .map(l => ({ lap_number: l.lap_number, date_start: new Date(l.date_start).getTime() }))
+    .sort((a, b) => a.date_start - b.date_start);
+  if (!lapBoundaries.length) throw new Error("No lap boundary data returned — can't slice laps accurately.");
 }
 
 // --- Step 3: GHOST BUFFER ---
-const REAL_LAP_COUNT_V0 = 5;
 const SAMPLES_PER_LAP = 300;
 const MAX_GHOSTS = 4;
 
@@ -267,6 +285,7 @@ let lapBuffers = [];
 let currentLapIndex = 0;
 let ghostEntities = [];
 let liveCarEntity = null;
+let REAL_LAP_COUNT_V0 = 0;  // set from real lap boundary data, not guessed
 
 function mapCarTelemetryToRealWorld() {
   const x0 = carFrames[0].x;
@@ -279,14 +298,26 @@ function mapCarTelemetryToRealWorld() {
   });
 }
 
+// Slices carCartesiansAll on real lap-start timestamps from the OpenF1
+// /laps endpoint (lapBoundaries), instead of the old approach of
+// dividing the sample array into a fixed, guessed number of equal
+// chunks. That guess never lined up with the actual start/finish line,
+// which is what made playback look like the data was glitching.
 function buildLapBuffers() {
-  const perLap = Math.floor(carCartesiansAll.length / REAL_LAP_COUNT_V0);
+  const frameTimes = carFrames.map(f => new Date(f.date).getTime());
   lapBuffers = [];
-  for (let lap = 0; lap < REAL_LAP_COUNT_V0; lap++) {
-    const start = lap * perLap;
-    const chunk = carCartesiansAll.slice(start, start + perLap);
+  for (let lap = 0; lap < lapBoundaries.length; lap++) {
+    const startT = lapBoundaries[lap].date_start;
+    const endT = lap + 1 < lapBoundaries.length ? lapBoundaries[lap + 1].date_start : Infinity;
+    let startIdx = frameTimes.findIndex(t => t >= startT);
+    if (startIdx === -1) continue;
+    let endIdx = frameTimes.findIndex(t => t >= endT);
+    if (endIdx === -1) endIdx = frameTimes.length;
+    const chunk = carCartesiansAll.slice(startIdx, endIdx);
+    if (chunk.length < 2) continue;
     lapBuffers.push(resampleToFixedSteps(chunk, SAMPLES_PER_LAP));
   }
+  REAL_LAP_COUNT_V0 = lapBuffers.length;
 }
 
 function resampleToFixedSteps(points, steps) {
