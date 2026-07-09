@@ -163,7 +163,7 @@ async function init() {
     // lets you type an exact value, tap once for a small nudge, or
     // press-and-hold a button to run through values quickly.
     const controls = {
-      rot:  { min: 0,     max: 359, onChange: v => { ROTATION_OFFSET_DEG = v; recomputeGeometry(); } },
+      rot:  { min: -180,  max: 180, onChange: v => { ROTATION_OFFSET_DEG = v; recomputeGeometry(); } },
       zoom: { min: 0.3,   max: 4.0, onChange: v => { zoomMultiplier = v; } },
       panE: { min: -1000, max: 1000, onChange: v => { panEastM = v; recomputeGeometry(); } },
       panN: { min: -1000, max: 1000, onChange: v => { panNorthM = v; recomputeGeometry(); } },
