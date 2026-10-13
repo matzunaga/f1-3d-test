@@ -89,6 +89,10 @@ const DISTANCE_BEHIND = 60;
 let cameraHeightM = 3;
 let cameraPitchDeg = -13;
 let zoomMultiplier = 0.3;
+const HIDDEN_BUILDING_IDS = [
+  1412628537,   // glass bridge model across the track near the start
+  507976158,    // small building on the track near Copse
+];
 const CAR_LIFT_M = 1.5;       // red car rides this far above the terrain
 const TRACK_STEP_M = 5;       // spacing of the playback points
 
@@ -119,6 +123,7 @@ let trackEN = [];              // closed loop, local east/north meters, starts a
 let trackCart = [];            // same points as Cartesian at terrain height + lift
 let trackGroundCart = [];      // same points at height 0, for the clamped yellow line
 let trackHeadings = [];
+let trackHeights = [];         // terrain height under each track point
 let fit = null;                // telemetry-to-track rigid fit
 let trackPolylineEntity = null;
 let startFinishEntity = null;
@@ -250,7 +255,12 @@ async function init() {
     timeline: false,
     animation: false,
   });
-  viewer.scene.primitives.add(await Cesium.createOsmBuildingsAsync());
+  const osmBuildings = await Cesium.createOsmBuildingsAsync();
+  // OSM buildings that the mapping puts on the racing surface. Add more
+  // OSM element ids to this list to hide any other offender.
+  const hiddenIds = HIDDEN_BUILDING_IDS.map(id => "Number(${elementId}) !== " + id).join(" && ");
+  osmBuildings.style = new Cesium.Cesium3DTileStyle({ show: hiddenIds || "true" });
+  viewer.scene.primitives.add(osmBuildings);
 
   try {
     log("Loading telemetry from OpenF1...");
@@ -371,6 +381,7 @@ async function buildTrackGeometry() {
     console.warn("Terrain sampling failed, using height 0:", e);
   }
   window.__terrainOk = terrainOk;
+  trackHeights = heights;
   trackCart = trackEN.map((p, i) => { const g = fromEN(p[0], p[1]); return Cesium.Cartesian3.fromDegrees(g.lon, g.lat, heights[i] + CAR_LIFT_M); });
   trackGroundCart = trackEN.map(p => { const g = fromEN(p[0], p[1]); return Cesium.Cartesian3.fromDegrees(g.lon, g.lat, 0); });
 
@@ -432,7 +443,6 @@ const MAX_GHOSTS = 4;
 let lapBuffers = [];
 let currentLapIndex = 0;
 let ghostEntities = [];
-let liveCarEntity = null;
 let REAL_LAP_COUNT_V0 = 0;
 
 function buildLapBuffers() {
@@ -463,10 +473,56 @@ function resampleToFixedSteps(points, steps) {
   return out;
 }
 
+/* A simple open-wheel car built from boxes: x is forward, y is left, z is up,
+   wheels' bottoms at z = 0. About 5.6 m long and 2 m wide, like the real thing. */
+let carPrimitive = null;
+function buildCarPrimitive() {
+  const part = (dims, off, css) => new Cesium.GeometryInstance({
+    geometry: Cesium.BoxGeometry.fromDimensions({
+      dimensions: new Cesium.Cartesian3(dims[0], dims[1], dims[2]),
+      vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
+    }),
+    modelMatrix: Cesium.Matrix4.fromTranslation(new Cesium.Cartesian3(off[0], off[1], off[2])),
+    attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(Cesium.Color.fromCssColorString(css)) },
+  });
+  const RED = "#FF3C3C", BLACK = "#0D0D0D", YEL = "#E8FF00", WHITE = "#F0EDE6";
+  const parts = [
+    part([4.0, 0.9, 0.35], [0.0, 0, 0.45], RED),          // main body
+    part([1.8, 0.34, 0.22], [2.6, 0, 0.32], RED),         // nose
+    part([0.4, 2.0, 0.06], [3.5, 0, 0.12], BLACK),        // front wing
+    part([1.0, 0.5, 0.32], [-0.5, 0, 0.78], YEL),         // engine cover
+    part([0.3, 0.3, 0.3], [0.5, 0, 0.78], WHITE),         // helmet
+    part([0.2, 0.14, 0.7], [-2.1, 0, 0.7], RED),          // rear wing support
+    part([0.5, 1.6, 0.06], [-2.3, 0, 1.08], BLACK),       // rear wing
+    part([0.7, 0.4, 0.7], [1.6, 0.98, 0.35], BLACK),      // front wheels
+    part([0.7, 0.4, 0.7], [1.6, -0.98, 0.35], BLACK),
+    part([0.8, 0.5, 0.75], [-1.5, 1.0, 0.375], BLACK),    // rear wheels
+    part([0.8, 0.5, 0.75], [-1.5, -1.0, 0.375], BLACK),
+  ];
+  return new Cesium.Primitive({
+    geometryInstances: parts,
+    appearance: new Cesium.PerInstanceColorAppearance({ translucent: false, closed: true }),
+    asynchronous: false,
+  });
+}
+
+function carMatrixAt(i) {
+  const N = trackCart.length;
+  const pos = trackCart[i];
+  const up = Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3());
+  const ground = Cesium.Cartesian3.add(pos, Cesium.Cartesian3.multiplyByScalar(up, 0.15 - CAR_LIFT_M, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+  const j = (i + 3) % N;
+  const run = Math.hypot(trackEN[j][0] - trackEN[i][0], trackEN[j][1] - trackEN[i][1]) || 1;
+  const pitch = Math.atan2(trackHeights[j] - trackHeights[i], run);
+  // compass bearing -> Cesium heading (zero points east, clockwise)
+  const hpr = new Cesium.HeadingPitchRoll(trackHeadings[i] - Math.PI / 2, pitch, 0);
+  return Cesium.Transforms.headingPitchRollToFixedFrame(ground, hpr);
+}
+
 function clearGhostEntities() {
   ghostEntities.forEach(e => viewer.entities.remove(e));
   ghostEntities = [];
-  if (liveCarEntity) { viewer.entities.remove(liveCarEntity); liveCarEntity = null; }
+  if (carPrimitive) { viewer.scene.primitives.remove(carPrimitive); carPrimitive = null; }
 }
 
 /* ---------- playback ---------- */
@@ -494,10 +550,9 @@ function playLap() {
     });
   });
 
-  liveCarEntity = viewer.entities.add({
-    point: { pixelSize: 14, color: Cesium.Color.fromCssColorString("#FF3C3C") },
-    position: trackCart[0],
-  });
+  carPrimitive = buildCarPrimitive();
+  carPrimitive.modelMatrix = carMatrixAt(0);
+  viewer.scene.primitives.add(carPrimitive);
 
   const total = trackCart.length;
   let i = 0;
@@ -528,7 +583,7 @@ function playLap() {
       orientation: { heading: trackHeadings[i], pitch: Cesium.Math.toRadians(cameraPitchDeg), roll: 0 },
     });
 
-    liveCarEntity.position = pos;
+    carPrimitive.modelMatrix = carMatrixAt(i);
 
     const progressFrac = i / (total - 1);
     ghostEntities.forEach((entity, idx) => {
