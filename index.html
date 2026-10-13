@@ -820,10 +820,12 @@ function drawHud(st) {
   gTicks(cx, cy, r, SPEED_MAX, 10, 40, 40, 1, 12);
   hText(num(st.speed), cx, cy - 4 * k, 92, 700, C.white);
   hText("KM/H", cx, cy + 48 * k, 14, 500, "rgba(240,237,230,0.8)");
-  const drsOn = st.drs != null && st.drs >= 10;
-  hx.beginPath(); hx.roundRect(cx - 24 * k, cy + 64 * k, 48 * k, 20 * k, 4 * k);
-  hx.fillStyle = drsOn ? C.yellow : "rgba(61,61,61,0.7)"; hx.fill();
-  hText("DRS", cx, cy + 74.5 * k, 13, 700, drsOn ? C.black : "rgba(240,237,230,0.6)");
+  if (curSession && curSession.year < 2026) {   /* DRS no longer exists in 2026 data (field is empty) */
+    const drsOn = st.drs != null && st.drs >= 10;
+    hx.beginPath(); hx.roundRect(cx - 24 * k, cy + 64 * k, 48 * k, 20 * k, 4 * k);
+    hx.fillStyle = drsOn ? C.yellow : "rgba(61,61,61,0.7)"; hx.fill();
+    hText("DRS", cx, cy + 74.5 * k, 13, 700, drsOn ? C.black : "rgba(240,237,230,0.6)");
+  }
 
   /* ---------- revs and gear (left) ---------- */
   const lx = cx - 250 * k, ly = HH - 110 * k, lr = 88 * k;
