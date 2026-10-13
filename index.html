@@ -120,6 +120,17 @@ function setAnchor(lat, lon) {
 const toEN = (lat, lon) => [(lon - ANCHOR_LON) * KLON, (lat - ANCHOR_LAT) * KLAT];
 const fromEN = (e, n) => ({ lat: ANCHOR_LAT + n / KLAT, lon: ANCHOR_LON + e / KLON });
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function jget(url, tries) {
+  for (let i = 0; i < (tries || 6); i++) {
+    try {
+      const r = await fetch(url);
+      if (r.ok) { const j = await r.json(); if (Array.isArray(j)) return j; }
+    } catch (e) {}
+    await sleep(700 * (i + 1));
+  }
+  throw new Error("OpenF1 did not answer: " + url.replace(OPENF1, ""));
+}
 const statusEl = document.getElementById("status");
 function log(msg) { console.log(msg); statusEl.textContent = msg; statusEl.style.display = "block"; }
 
@@ -299,7 +310,7 @@ async function loadSessionList() {
   const all = [];
   for (const y of RACE_YEARS) {
     try {
-      const r = await fetch(`${OPENF1}/sessions?session_name=Race&year=${y}`).then(r => r.json());
+      const r = await jget(`${OPENF1}/sessions?session_name=Race&year=${y}`);
       if (Array.isArray(r)) r.forEach(s => { if (supported.has(s.circuit_short_name)) all.push(s); });
     } catch (e) { console.warn("sessions fetch failed for", y, e); }
   }
@@ -347,7 +358,7 @@ async function loadAll(sessionKey, driverNumber) {
   if (tok !== loadToken) return;
 
   if (sessionKey != curSessionKey || !drivers.length) {
-    const d = await fetch(`${OPENF1}/drivers?session_key=${sessionKey}`).then(r => r.json());
+    const d = await jget(`${OPENF1}/drivers?session_key=${sessionKey}`);
     if (!Array.isArray(d) || !d.length) throw new Error("No drivers found for this session.");
     drivers = d.sort((a, b) => a.driver_number - b.driver_number);
     const dsel = document.getElementById("driverSel");
@@ -366,11 +377,11 @@ async function loadAll(sessionKey, driverNumber) {
 
   log("Loading telemetry for " + (drv.full_name || drv.driver_number) + "...");
   const dn = drv.driver_number;
-  const [loc, laps, st, pos] = await Promise.all([
-    fetch(`${OPENF1}/location?session_key=${sessionKey}&driver_number=${dn}`).then(r => r.json()),
-    fetch(`${OPENF1}/laps?session_key=${sessionKey}&driver_number=${dn}`).then(r => r.json()),
-    fetch(`${OPENF1}/stints?session_key=${sessionKey}&driver_number=${dn}`).then(r => r.json()).catch(() => []),
-    fetch(`${OPENF1}/position?session_key=${sessionKey}&driver_number=${dn}`).then(r => r.json()).catch(() => []),
+  const loc = await jget(`${OPENF1}/location?session_key=${sessionKey}&driver_number=${dn}`);
+  const [laps, st, pos] = await Promise.all([
+    jget(`${OPENF1}/laps?session_key=${sessionKey}&driver_number=${dn}`),
+    jget(`${OPENF1}/stints?session_key=${sessionKey}&driver_number=${dn}`).catch(() => []),
+    jget(`${OPENF1}/position?session_key=${sessionKey}&driver_number=${dn}`).catch(() => []),
   ]);
   if (tok !== loadToken) return;
   if (!Array.isArray(loc) || !loc.length) throw new Error("No location data returned for driver " + dn + ".");
@@ -586,8 +597,7 @@ function getLapCar(lapIdx) {
   const lb = lapBoundaries[lapIdx], lp = lapProgress[lapIdx];
   const a = isoNoZ(lb.date_start - 600), b = isoNoZ(lb.date_start + lp.dur + 600);
   const sk = curSessionKey, dn = curDriver.driver_number;
-  const p = fetch(`${OPENF1}/car_data?session_key=${sk}&driver_number=${dn}&date>${a}&date<${b}`)
-    .then(r => r.json())
+  const p = jget(`${OPENF1}/car_data?session_key=${sk}&driver_number=${dn}&date>${a}&date<${b}`)
     .then(rows => {
       if (!Array.isArray(rows) || !rows.length) throw new Error("no car data");
       rows.sort((x, y) => new Date(x.date) - new Date(y.date));
