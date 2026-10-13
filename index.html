@@ -10,21 +10,21 @@
   html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; touch-action: none; }
   #status { position: absolute; top: 8px; left: 8px; z-index: 999; background: rgba(13,13,13,0.85); color: #E8FF00;
             font-family: monospace; font-size: 11px; padding: 6px 8px; max-width: 300px; white-space: pre-wrap; border-radius: 4px; }
-  #panel { position: absolute; top: 8px; right: 8px; z-index: 999; width: 168px; box-sizing: border-box;
-           background: rgba(13,13,13,0.8); padding: 7px; border-radius: 6px; max-height: calc(100% - 16px); overflow-y: auto;
+  #panel { position: absolute; top: 8px; right: 8px; z-index: 999; width: 128px; box-sizing: border-box;
+           background: rgba(13,13,13,0.8); padding: 5px; border-radius: 6px; max-height: calc(100% - 16px); overflow-y: auto;
            font-family: monospace; color: #F0EDE6; }
-  #panelBody { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+  #panelBody { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
   button { background:#0D0D0D; color:#F0EDE6; border:1px solid #E8FF00; font-family:monospace; cursor:pointer; border-radius:4px; }
   button:hover { background:#1a1a1a; }
-  .wide { width: 100%; padding: 7px 6px; font-size: 12px; }
-  .row { display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #cfcbc2; }
-  .ctl { display: flex; align-items: center; gap: 3px; font-size: 11px; color: #F0EDE6; }
-  .stepBtn { background:#0D0D0D; color:#E8FF00; border:1px solid #E8FF00; width:26px; height:26px; padding:0;
-             font-family:monospace; font-size:16px; line-height:1; cursor:pointer; border-radius:4px;
+  .wide { width: 100%; padding: 4px 4px; font-size: 10px; }
+  .row { display: flex; flex-direction: column; gap: 1px; font-size: 9px; color: #cfcbc2; }
+  .ctl { display: flex; align-items: center; gap: 2px; font-size: 10px; color: #F0EDE6; }
+  .stepBtn { background:#0D0D0D; color:#E8FF00; border:1px solid #E8FF00; width:20px; height:20px; padding:0;
+             font-family:monospace; font-size:13px; line-height:1; cursor:pointer; border-radius:4px;
              display:flex; align-items:center; justify-content:center; user-select:none; touch-action:manipulation; flex:none; }
   .stepBtn:active { background:#E8FF00; color:#0D0D0D; }
-  .stepInput { width:52px; height:24px; box-sizing:border-box; background:#1a1a1a; color:#F0EDE6; border:1px solid #3D3D3D;
-               font-family:monospace; font-size:12px; text-align:center; border-radius:4px; padding:0; }
+  .stepInput { width:42px; height:20px; box-sizing:border-box; background:#1a1a1a; color:#F0EDE6; border:1px solid #3D3D3D;
+               font-family:monospace; font-size:10px; text-align:center; border-radius:4px; padding:0; }
   .stepInput:focus { outline:2px solid #E8FF00; border-color:#E8FF00; }
 </style>
 </head>
@@ -41,13 +41,13 @@
       <button class="stepBtn" data-ctl="zoom" data-dir="1">+</button>x</div></div>
     <div class="row">Cam height
       <div class="ctl"><button class="stepBtn" data-ctl="camH" data-dir="-1">-</button>
-      <input class="stepInput" id="camHVal" type="number" step="1" value="145">
+      <input class="stepInput" id="camHVal" type="number" step="1" value="3">
       <button class="stepBtn" data-ctl="camH" data-dir="1">+</button>m</div></div>
     <div class="row">Cam pitch
       <div class="ctl"><button class="stepBtn" data-ctl="camP" data-dir="-1">-</button>
       <input class="stepInput" id="camPVal" type="number" step="1" value="-13">
       <button class="stepBtn" data-ctl="camP" data-dir="1">+</button>&deg;</div></div>
-    <div class="row">Ghost rotation (fine-tune)
+    <div class="row">Ghost rotation
       <div class="ctl"><button class="stepBtn" data-ctl="rot" data-dir="-1">-</button>
       <input class="stepInput" id="rotVal" type="number" step="0.5" value="0">
       <button class="stepBtn" data-ctl="rot" data-dir="1">+</button>&deg;</div></div>
@@ -86,7 +86,7 @@ const OSM_TRACK_ENC = "uzzt0.-ly4l bl.ee tw.113 xl.15p bz.f0 2f.30 28.2y 10.1g h
 // Ghost fine-tune (applied on top of the automatic telemetry fit).
 let ghostRotDeg = 0, ghostEastM = 0, ghostNorthM = 0;
 const DISTANCE_BEHIND = 60;
-let cameraHeightM = 145;
+let cameraHeightM = 3;
 let cameraPitchDeg = -13;
 let zoomMultiplier = 0.3;
 const CAR_LIFT_M = 1.5;       // red car rides this far above the terrain
@@ -297,7 +297,7 @@ async function init() {
     // Each control is a tap-to-type number input flanked by - / + buttons.
     const controls = {
       zoom: { min: 0.3,  max: 4.0,  onChange: v => { zoomMultiplier = v; } },
-      camH: { min: 5,    max: 500,  onChange: v => { cameraHeightM = v; } },
+      camH: { min: 1,    max: 500,  onChange: v => { cameraHeightM = v; } },
       camP: { min: -90,  max: -5,   onChange: v => { cameraPitchDeg = v; } },
       rot:  { min: -30,  max: 30,   onChange: v => { ghostRotDeg = v; buildLapBuffers(); } },
       panE: { min: -300, max: 300,  onChange: v => { ghostEastM = v; buildLapBuffers(); } },
