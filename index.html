@@ -33,32 +33,32 @@
   <button id="overviewBtn">Overview (top-down)</button>
   <label id="rotWrap"><span class="stepLabel">Rotation</span>
     <button class="stepBtn" data-ctl="rot" data-dir="-1">-</button>
-    <input class="stepInput" id="rotVal" type="number" step="0.5" value="0">
+    <input class="stepInput" id="rotVal" type="number" step="0.5" value="-2.5">
     <button class="stepBtn" data-ctl="rot" data-dir="1">+</button>&deg;
   </label>
   <label id="rotWrap"><span class="stepLabel">Zoom</span>
     <button class="stepBtn" data-ctl="zoom" data-dir="-1">-</button>
-    <input class="stepInput" id="zoomVal" type="number" step="0.1" value="1.0">
+    <input class="stepInput" id="zoomVal" type="number" step="0.1" value="0.3">
     <button class="stepBtn" data-ctl="zoom" data-dir="1">+</button>x
   </label>
   <label id="rotWrap"><span class="stepLabel">Shift E/W</span>
     <button class="stepBtn" data-ctl="panE" data-dir="-1">-</button>
-    <input class="stepInput" id="panEVal" type="number" step="1" value="0">
+    <input class="stepInput" id="panEVal" type="number" step="1" value="-518">
     <button class="stepBtn" data-ctl="panE" data-dir="1">+</button>m
   </label>
   <label id="rotWrap"><span class="stepLabel">Shift N/S</span>
     <button class="stepBtn" data-ctl="panN" data-dir="-1">-</button>
-    <input class="stepInput" id="panNVal" type="number" step="1" value="0">
+    <input class="stepInput" id="panNVal" type="number" step="1" value="-348">
     <button class="stepBtn" data-ctl="panN" data-dir="1">+</button>m
   </label>
   <label id="rotWrap"><span class="stepLabel">Cam Height</span>
     <button class="stepBtn" data-ctl="camH" data-dir="-1">-</button>
-    <input class="stepInput" id="camHVal" type="number" step="1" value="150">
+    <input class="stepInput" id="camHVal" type="number" step="1" value="145">
     <button class="stepBtn" data-ctl="camH" data-dir="1">+</button>m
   </label>
   <label id="rotWrap"><span class="stepLabel">Cam Pitch</span>
     <button class="stepBtn" data-ctl="camP" data-dir="-1">-</button>
-    <input class="stepInput" id="camPVal" type="number" step="1" value="-60">
+    <input class="stepInput" id="camPVal" type="number" step="1" value="-13">
     <button class="stepBtn" data-ctl="camP" data-dir="1">+</button>&deg;
   </label>
 </div>
@@ -78,24 +78,24 @@ const MUNICH_CENTERLINE_URL = "https://raw.githubusercontent.com/TUMFTM/racetrac
 // Rotation, shift, camera height and pitch are live number controls
 // (type a value, tap -/+, or hold a button). The yellow line redraws in
 // real time against the satellite imagery.
-let ROTATION_OFFSET_DEG = 0;
+let ROTATION_OFFSET_DEG = -2.5;
 const DISTANCE_BEHIND = 60;
 
 // Camera height (meters above track) and pitch (degrees, 0 = level with
 // horizon, -90 = straight down). playLap() reads these every frame.
-let cameraHeightM = 150;
-let cameraPitchDeg = -60;
+let cameraHeightM = 145;
+let cameraPitchDeg = -13;
 
 // Zoom multiplier. playLap() forces the camera to an exact position every
 // frame, so pinch-to-zoom gets overridden; this value is read inside that
 // same per-frame update so zoom actually sticks during playback.
-let zoomMultiplier = 1.0;
+let zoomMultiplier = 0.3;
 
 // Live position offset, in real meters east and north of the anchor.
 // Fixes a translation error separately from rotation, which is a
 // different kind of error.
-let panEastM = 0;
-let panNorthM = 0;
+let panEastM = -518;
+let panNorthM = -348;
 
 function rotateXY(dx, dy, angleDeg) {
   const rad = Cesium.Math.toRadians(angleDeg);
