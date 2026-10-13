@@ -41,11 +41,11 @@
       <button class="stepBtn" data-ctl="zoom" data-dir="1">+</button>x</div></div>
     <div class="row">Cam height
       <div class="ctl"><button class="stepBtn" data-ctl="camH" data-dir="-1">-</button>
-      <input class="stepInput" id="camHVal" type="number" step="1" value="3">
+      <input class="stepInput" id="camHVal" type="number" step="1" value="1">
       <button class="stepBtn" data-ctl="camH" data-dir="1">+</button>m</div></div>
     <div class="row">Cam pitch
       <div class="ctl"><button class="stepBtn" data-ctl="camP" data-dir="-1">-</button>
-      <input class="stepInput" id="camPVal" type="number" step="1" value="-13">
+      <input class="stepInput" id="camPVal" type="number" step="1" value="-5">
       <button class="stepBtn" data-ctl="camP" data-dir="1">+</button>&deg;</div></div>
     <div class="row">Ghost rotation
       <div class="ctl"><button class="stepBtn" data-ctl="rot" data-dir="-1">-</button>
@@ -86,8 +86,8 @@ const OSM_TRACK_ENC = "uzzt0.-ly4l bl.ee tw.113 xl.15p bz.f0 2f.30 28.2y 10.1g h
 // Ghost fine-tune (applied on top of the automatic telemetry fit).
 let ghostRotDeg = 0, ghostEastM = 0, ghostNorthM = 0;
 const DISTANCE_BEHIND = 60;
-let cameraHeightM = 3;
-let cameraPitchDeg = -13;
+let cameraHeightM = 1;
+let cameraPitchDeg = -5;
 let zoomMultiplier = 0.3;
 const HIDDEN_BUILDING_IDS = [
   1412628537,   // glass bridge model across the track near the start
