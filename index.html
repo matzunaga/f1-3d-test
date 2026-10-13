@@ -124,6 +124,7 @@ let trackEN = [];              // closed loop, local east/north meters, starts a
 let trackCart = [];            // same points as Cartesian at terrain height + lift
 let trackGroundCart = [];      // same points at height 0, for the clamped yellow line
 let trackHeadings = [];
+let TRACK_LENGTH_M = 5890, trackStepM = 5;
 let trackHeights = [];         // terrain height under each track point
 let fit = null;                // telemetry-to-track rigid fit
 let trackPolylineEntity = null;
@@ -270,6 +271,7 @@ async function init() {
     log("Building the track from OpenStreetMap and fitting telemetry...");
     const loop = resampleClosed(decodeOsmTrack(), TRACK_STEP_M);
     trackEN = loop.pts;
+    TRACK_LENGTH_M = loop.length;
     const dense = resampleClosed(trackEN, 2).pts;
 
     const frameTimes = carFrames.map(f => new Date(f.date).getTime());
@@ -290,11 +292,13 @@ async function init() {
     trackEN = trackEN.slice(startIdx).concat(trackEN.slice(0, startIdx));
 
     await buildTrackGeometry();
-    buildLapBuffers();
+    computeLapProgress();
+    currentLapIndex = fastestLapIndex;
 
     log("Ready. Track: " + (loop.length / 1000).toFixed(2) + " km from OpenStreetMap" +
         " | Telemetry fit: mean " + fit.meanErr.toFixed(1) + " m, 90% within " + fit.p90.toFixed(1) + " m" +
-        " | Laps: " + lapBuffers.length + "\nTap Overview to check, or Play next lap.");
+        " | Laps: " + REAL_LAP_COUNT_V0 +
+        " | First play: lap " + lapBoundaries[fastestLapIndex].lap_number + " (fastest), in real time" + "\nTap Overview to check, or Play next lap.");
 
     document.getElementById("playBtn").onclick = () => playLap();
     document.getElementById("overviewBtn").onclick = () => showOverview();
@@ -310,9 +314,9 @@ async function init() {
       zoom: { min: 0.3,  max: 4.0,  onChange: v => { zoomMultiplier = v; } },
       camH: { min: 1,    max: 500,  onChange: v => { cameraHeightM = v; } },
       camP: { min: -90,  max: -5,   onChange: v => { cameraPitchDeg = v; } },
-      rot:  { min: -30,  max: 30,   onChange: v => { ghostRotDeg = v; buildLapBuffers(); } },
-      panE: { min: -300, max: 300,  onChange: v => { ghostEastM = v; buildLapBuffers(); } },
-      panN: { min: -300, max: 300,  onChange: v => { ghostNorthM = v; buildLapBuffers(); } },
+      rot:  { min: -30,  max: 30,   onChange: v => { ghostRotDeg = v; computeLapProgress(); } },
+      panE: { min: -300, max: 300,  onChange: v => { ghostEastM = v; computeLapProgress(); } },
+      panN: { min: -300, max: 300,  onChange: v => { ghostNorthM = v; computeLapProgress(); } },
     };
     const idFor = { rot: "rotVal", zoom: "zoomVal", panE: "panEVal", panN: "panNVal", camH: "camHVal", camP: "camPVal" };
 
@@ -386,6 +390,7 @@ async function buildTrackGeometry() {
   trackCart = trackEN.map((p, i) => { const g = fromEN(p[0], p[1]); return Cesium.Cartesian3.fromDegrees(g.lon, g.lat, heights[i] + CAR_LIFT_M); });
   trackGroundCart = trackEN.map(p => { const g = fromEN(p[0], p[1]); return Cesium.Cartesian3.fromDegrees(g.lon, g.lat, 0); });
 
+  trackStepM = TRACK_LENGTH_M / trackEN.length;
   const N = trackEN.length, AHEAD = 3;
   trackHeadings = trackEN.map((p, i) => {
     const q = trackEN[(i + AHEAD) % N];
@@ -433,144 +438,147 @@ async function loadOpenF1Data() {
   const laps = await lapRes.json();
   lapBoundaries = laps
     .filter(l => l.date_start)
-    .map(l => ({ lap_number: l.lap_number, date_start: new Date(l.date_start).getTime() }))
+    .map(l => ({ lap_number: l.lap_number, date_start: new Date(l.date_start).getTime(), lap_duration: l.lap_duration, pit_out: !!l.is_pit_out_lap }))
     .sort((a, b) => a.date_start - b.date_start);
   if (!lapBoundaries.length) throw new Error("No lap boundary data returned — can't slice laps accurately.");
 }
 
-/* ---------- ghost buffers ---------- */
-const SAMPLES_PER_LAP = 300;
+/* ---------- real-time lap playback ----------
+   Each real lap becomes a table of (time since the lap started, distance along
+   the track). Playback runs on the wall clock, so a lap takes its true lap time
+   and the car speeds up and slows down exactly as the real car did. */
 const MAX_GHOSTS = 4;
-let lapBuffers = [];
+let lapProgress = [];          // aligned with lapBoundaries: { t: ms since lap start, s: track index (continuous), dur: ms } or null
 let currentLapIndex = 0;
+let fastestLapIndex = 0;
 let ghostEntities = [];
 let REAL_LAP_COUNT_V0 = 0;
 
-function buildLapBuffers() {
+function trackProgressFor(frames, startT) {
+  const N = trackEN.length;
+  const T = new Float64Array(frames.length), S = new Float64Array(frames.length);
+  const segFrac = (p, i0) => {
+    const a = trackEN[((i0 % N) + N) % N], b = trackEN[(((i0 + 1) % N) + N) % N];
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const tt = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+    return { t: tt, d: Math.hypot(p[0] - (a[0] + dx * tt), p[1] - (a[1] + dy * tt)) };
+  };
+  let prevIdx = -1, cont = 0;
+  for (let k = 0; k < frames.length; k++) {
+    const p = frameToEN(frames[k]);
+    let best = 1e18, bi = 0;
+    const scan = (from, to) => {
+      for (let d = from; d <= to; d++) {
+        const i = prevIdx < 0 ? d : (((prevIdx + d) % N) + N) % N;
+        const dx = trackEN[i][0] - p[0], dy = trackEN[i][1] - p[1], q = dx * dx + dy * dy;
+        if (q < best) { best = q; bi = i; }
+      }
+    };
+    if (prevIdx < 0) scan(0, N - 1); else { scan(-8, 60); if (Math.sqrt(best) > 40) { prevIdx = -1; best = 1e18; scan(0, N - 1); } }
+    const s1 = segFrac(p, bi), s0 = segFrac(p, bi - 1);
+    const frac = s0.d < s1.d ? (bi - 1 + s0.t) : (bi + s1.t);
+    if (k === 0) { cont = frac > N / 2 ? frac - N : frac; }
+    else {
+      const base = ((cont % N) + N) % N;
+      let delta = frac - base;
+      if (delta > N / 2) delta -= N; if (delta < -N / 2) delta += N;
+      cont = Math.max(cont, cont + delta);   // the car never goes backwards
+    }
+    prevIdx = bi;
+    T[k] = new Date(frames[k].date).getTime() - startT;
+    S[k] = cont;
+  }
+  return { t: T, s: S };
+}
+
+function computeLapProgress() {
   const frameTimes = carFrames.map(f => new Date(f.date).getTime());
-  const carCartesiansAll = carFrames.map(f => {
-    const p = frameToEN(f), g = fromEN(p[0], p[1]);
-    return Cesium.Cartesian3.fromDegrees(g.lon, g.lat, 0);   // clamped to terrain when drawn
-  });
-  lapBuffers = [];
-  for (let lap = 0; lap < lapBoundaries.length; lap++) {
+  lapProgress = lapBoundaries.map((lb, lap) => {
     const r = lapFrameRange(frameTimes, lap);
-    if (!r) continue;
-    const chunk = carCartesiansAll.slice(r[0], r[1]);
-    if (chunk.length < 2) continue;
-    lapBuffers.push(resampleToFixedSteps(chunk, SAMPLES_PER_LAP));
-  }
-  REAL_LAP_COUNT_V0 = lapBuffers.length;
-}
-
-function resampleToFixedSteps(points, steps) {
-  const out = [];
-  for (let i = 0; i < steps; i++) {
-    const t = (i / (steps - 1)) * (points.length - 1);
-    const i0 = Math.floor(t);
-    const i1 = Math.min(i0 + 1, points.length - 1);
-    out.push(Cesium.Cartesian3.lerp(points[i0], points[i1], t - i0, new Cesium.Cartesian3()));
-  }
-  return out;
-}
-
-/* A simple open-wheel car built from boxes: x is forward, y is left, z is up,
-   wheels' bottoms at z = 0. About 5.6 m long and 2 m wide, like the real thing. */
-let carPrimitive = null;
-function buildCarPrimitive() {
-  const part = (dims, off, css) => new Cesium.GeometryInstance({
-    geometry: Cesium.BoxGeometry.fromDimensions({
-      dimensions: new Cesium.Cartesian3(dims[0], dims[1], dims[2]),
-      vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
-    }),
-    modelMatrix: Cesium.Matrix4.fromTranslation(new Cesium.Cartesian3(off[0], off[1], off[2])),
-    attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(Cesium.Color.fromCssColorString(css)) },
+    if (!r || r[1] - r[0] < 10) return null;
+    const lp = trackProgressFor(carFrames.slice(r[0], r[1]), lb.date_start);
+    const endT = lap + 1 < lapBoundaries.length ? lapBoundaries[lap + 1].date_start : null;
+    lp.dur = endT ? endT - lb.date_start : lp.t[lp.t.length - 1];
+    return lp;
   });
-  const RED = "#FF3C3C", BLACK = "#0D0D0D", YEL = "#E8FF00", WHITE = "#F0EDE6";
-  const parts = [
-    part([4.0, 0.9, 0.35], [0.0, 0, 0.45], RED),          // main body
-    part([1.8, 0.34, 0.22], [2.6, 0, 0.32], RED),         // nose
-    part([0.4, 2.0, 0.06], [3.5, 0, 0.12], BLACK),        // front wing
-    part([1.0, 0.5, 0.32], [-0.5, 0, 0.78], YEL),         // engine cover
-    part([0.3, 0.3, 0.3], [0.5, 0, 0.78], WHITE),         // helmet
-    part([0.2, 0.14, 0.7], [-2.1, 0, 0.7], RED),          // rear wing support
-    part([0.5, 1.6, 0.06], [-2.3, 0, 1.08], BLACK),       // rear wing
-    part([0.7, 0.4, 0.7], [1.6, 0.98, 0.35], BLACK),      // front wheels
-    part([0.7, 0.4, 0.7], [1.6, -0.98, 0.35], BLACK),
-    part([0.8, 0.5, 0.75], [-1.5, 1.0, 0.375], BLACK),    // rear wheels
-    part([0.8, 0.5, 0.75], [-1.5, -1.0, 0.375], BLACK),
-  ];
-  return new Cesium.Primitive({
-    geometryInstances: parts,
-    appearance: new Cesium.PerInstanceColorAppearance({ translucent: false, closed: true }),
-    asynchronous: false,
+  REAL_LAP_COUNT_V0 = lapProgress.filter(Boolean).length;
+  let bestDur = Infinity;
+  lapBoundaries.forEach((lb, i) => {
+    if (lapProgress[i] && lb.lap_duration > 0 && !lb.pit_out && lb.lap_duration < bestDur) { bestDur = lb.lap_duration; fastestLapIndex = i; }
   });
 }
 
-function carMatrixAt(i) {
-  const N = trackCart.length;
-  const pos = trackCart[i];
-  const up = Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3());
-  const ground = Cesium.Cartesian3.add(pos, Cesium.Cartesian3.multiplyByScalar(up, 0.15 - CAR_LIFT_M, new Cesium.Cartesian3()), new Cesium.Cartesian3());
-  const j = (i + 3) % N;
-  const run = Math.hypot(trackEN[j][0] - trackEN[i][0], trackEN[j][1] - trackEN[i][1]) || 1;
-  const pitch = Math.atan2(trackHeights[j] - trackHeights[i], run);
-  // compass bearing -> Cesium heading (zero points east, clockwise)
-  const hpr = new Cesium.HeadingPitchRoll(trackHeadings[i] - Math.PI / 2, pitch, 0);
-  return Cesium.Transforms.headingPitchRollToFixedFrame(ground, hpr);
+function progressAt(lp, tms) {
+  const T = lp.t, S = lp.s, n = T.length;
+  if (tms <= T[0]) return S[0];
+  if (tms >= T[n - 1]) return S[n - 1];
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (T[mid] <= tms) lo = mid; else hi = mid; }
+  return S[lo] + (S[hi] - S[lo]) * ((tms - T[lo]) / ((T[hi] - T[lo]) || 1));
+}
+
+function trackPointAt(arr, s) {
+  const N = arr.length, fl = Math.floor(s), f = s - fl;
+  return Cesium.Cartesian3.lerp(arr[((fl % N) + N) % N], arr[(((fl + 1) % N) + N) % N], f, new Cesium.Cartesian3());
+}
+
+function headingAt(s) {
+  const N = trackHeadings.length, fl = Math.floor(s), f = s - fl;
+  const a = trackHeadings[((fl % N) + N) % N], b = trackHeadings[(((fl + 1) % N) + N) % N];
+  const d = ((b - a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+  return a + d * f;
 }
 
 function clearGhostEntities() {
   ghostEntities.forEach(e => viewer.entities.remove(e));
   ghostEntities = [];
-  if (carPrimitive) { viewer.scene.primitives.remove(carPrimitive); carPrimitive = null; }
 }
 
-/* ---------- playback ---------- */
+const fmtLap = ms => { const s = ms / 1000, m = Math.floor(s / 60); return m + ":" + (s - m * 60).toFixed(3).padStart(6, "0"); };
+
 let activePlaybackInterval = null;
 
 function playLap() {
-  if (!trackCart.length || !lapBuffers.length) { log("Data not ready — can't play."); return; }
+  if (!trackCart.length || !REAL_LAP_COUNT_V0) { log("Data not ready — can't play."); return; }
 
   if (activePlaybackInterval !== null) { clearInterval(activePlaybackInterval); activePlaybackInterval = null; }
   viewer.camera.cancelFlight();
   clearGhostEntities();
 
+  let guard = 0;
+  while (!lapProgress[currentLapIndex] && guard++ < lapProgress.length) currentLapIndex = (currentLapIndex + 1) % lapProgress.length;
+  const lapIdx = currentLapIndex;
+  const lp = lapProgress[lapIdx];
+  const lapNo = lapBoundaries[lapIdx].lap_number;
+
   const ghostLapIndices = [];
-  for (let g = currentLapIndex - 1; g >= 0 && ghostLapIndices.length < MAX_GHOSTS; g--) ghostLapIndices.push(g);
+  for (let g = lapIdx - 1; g >= 0 && ghostLapIndices.length < MAX_GHOSTS; g--) if (lapProgress[g]) ghostLapIndices.push(g);
 
-  ghostEntities = ghostLapIndices.map((lapIdx, order) => {
-    const age = order + 1;
-    return viewer.entities.add({
-      point: {
-        pixelSize: 10,
-        color: Cesium.Color.fromCssColorString("#E8FF00").withAlpha(Math.max(0.15, 1 - age * 0.22)),
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-      },
-      position: lapBuffers[lapIdx][0],
-    });
-  });
+  ghostEntities = ghostLapIndices.map((gi, order) => viewer.entities.add({
+    point: {
+      pixelSize: 10,
+      color: Cesium.Color.fromCssColorString("#E8FF00").withAlpha(Math.max(0.15, 1 - (order + 1) * 0.22)),
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    },
+    position: trackGroundCart[0],
+  }));
 
-  carPrimitive = buildCarPrimitive();
-  carPrimitive.modelMatrix = carMatrixAt(0);
-  viewer.scene.primitives.add(carPrimitive);
-
-  const total = trackCart.length;
-  let i = 0;
-  log("Playing lap " + (currentLapIndex + 1) + " of " + REAL_LAP_COUNT_V0 +
-      " — " + ghostLapIndices.length + " ghost(s) trailing.");
+  const wallStart = performance.now();
+  let lastLog = -1e9;
 
   activePlaybackInterval = setInterval(() => {
-    if (i >= total) {
+    const el = performance.now() - wallStart;
+    if (el >= lp.dur) {
       clearInterval(activePlaybackInterval);
       activePlaybackInterval = null;
-      currentLapIndex = (currentLapIndex + 1) % REAL_LAP_COUNT_V0;
-      log("Lap complete. Press Play next lap to continue — " +
-          Math.min(currentLapIndex, MAX_GHOSTS) + " ghost(s) will trail next time.");
+      currentLapIndex = (lapIdx + 1) % lapBoundaries.length;
+      log("Lap " + lapNo + " complete in " + fmtLap(lp.dur) + ". Press Play next lap to continue — " +
+          Math.min(ghostLapIndices.length + 1, MAX_GHOSTS) + " ghost(s) will trail next time.");
       return;
     }
-    const pos = trackCart[i];
-    const ahead = trackCart[(i + 3) % total];
+    const s = progressAt(lp, el);
+    const pos = trackPointAt(trackCart, s);
+    const ahead = trackPointAt(trackCart, s + 3);
 
     const forward = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(ahead, pos, new Cesium.Cartesian3()), new Cesium.Cartesian3());
     const up = Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3());
@@ -581,19 +589,22 @@ function playLap() {
     );
     viewer.camera.setView({
       destination: cameraPos,
-      orientation: { heading: trackHeadings[i], pitch: Cesium.Math.toRadians(cameraPitchDeg), roll: 0 },
+      orientation: { heading: headingAt(s), pitch: Cesium.Math.toRadians(cameraPitchDeg), roll: 0 },
     });
 
-    carPrimitive.modelMatrix = carMatrixAt(i);
-
-    const progressFrac = i / (total - 1);
     ghostEntities.forEach((entity, idx) => {
-      const buf = lapBuffers[ghostLapIndices[idx]];
-      entity.position = buf[Math.min(Math.round(progressFrac * (buf.length - 1)), buf.length - 1)];
+      entity.position = trackPointAt(trackGroundCart, progressAt(lapProgress[ghostLapIndices[idx]], el));
     });
 
-    i += 1;
-  }, 50);
+    if (el - lastLog > 250) {
+      lastLog = el;
+      const a = Math.max(0, el - 250), b = Math.min(lp.dur, el + 250);
+      const kmh = (progressAt(lp, b) - progressAt(lp, a)) * trackStepM / ((b - a) / 1000) * 3.6;
+      window.__playState = { lapNo, el, s, kmh };
+      log("Lap " + lapNo + (lapIdx === fastestLapIndex ? " (fastest)" : "") + "  " + fmtLap(el) + " / " + fmtLap(lp.dur) +
+          "\nSpeed from track progress: " + Math.round(kmh) + " km/h  |  " + ghostLapIndices.length + " ghost(s)");
+    }
+  }, 33);
 }
 
 init();
