@@ -8,59 +8,58 @@
 <link href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.120.0/Widgets/widgets.css" rel="stylesheet">
 <style>
   html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; touch-action: none; }
-  #status { position: absolute; top: 10px; left: 10px; z-index: 999; background: #0D0D0D; color: #E8FF00;
-            font-family: monospace; font-size: 13px; padding: 10px 14px; max-width: 480px; white-space: pre-wrap; }
-  #controls { position: absolute; bottom: 14px; left: 14px; z-index: 999; display: flex; flex-wrap: wrap;
-              align-items: center; gap: 14px; background: rgba(13,13,13,0.75); padding: 12px 16px; border-radius: 6px; }
-  button { background:#0D0D0D; color:#F0EDE6; border:1px solid #E8FF00; padding:14px 22px; font-family:monospace;
-           font-size: 15px; cursor:pointer; border-radius: 4px; }
+  #status { position: absolute; top: 8px; left: 8px; z-index: 999; background: rgba(13,13,13,0.85); color: #E8FF00;
+            font-family: monospace; font-size: 11px; padding: 6px 8px; max-width: 300px; white-space: pre-wrap; border-radius: 4px; }
+  #panel { position: absolute; top: 8px; right: 8px; z-index: 999; width: 168px; box-sizing: border-box;
+           background: rgba(13,13,13,0.8); padding: 7px; border-radius: 6px; max-height: calc(100% - 16px); overflow-y: auto;
+           font-family: monospace; color: #F0EDE6; }
+  #panelBody { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+  button { background:#0D0D0D; color:#F0EDE6; border:1px solid #E8FF00; font-family:monospace; cursor:pointer; border-radius:4px; }
   button:hover { background:#1a1a1a; }
-  #rotWrap { color:#F0EDE6; font-family:monospace; font-size:14px; display:flex; align-items:center; gap:4px; }
-  .stepBtn { background:#0D0D0D; color:#E8FF00; border:1px solid #E8FF00; width:36px; height:36px;
-             font-family:monospace; font-size:20px; line-height:1; cursor:pointer; border-radius:4px;
-             display:flex; align-items:center; justify-content:center; user-select:none; touch-action:manipulation; }
+  .wide { width: 100%; padding: 7px 6px; font-size: 12px; }
+  .row { display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #cfcbc2; }
+  .ctl { display: flex; align-items: center; gap: 3px; font-size: 11px; color: #F0EDE6; }
+  .stepBtn { background:#0D0D0D; color:#E8FF00; border:1px solid #E8FF00; width:26px; height:26px; padding:0;
+             font-family:monospace; font-size:16px; line-height:1; cursor:pointer; border-radius:4px;
+             display:flex; align-items:center; justify-content:center; user-select:none; touch-action:manipulation; flex:none; }
   .stepBtn:active { background:#E8FF00; color:#0D0D0D; }
-  .stepInput { width:64px; height:34px; background:#1a1a1a; color:#F0EDE6; border:1px solid #3D3D3D;
-               font-family:monospace; font-size:15px; text-align:center; border-radius:4px; }
+  .stepInput { width:52px; height:24px; box-sizing:border-box; background:#1a1a1a; color:#F0EDE6; border:1px solid #3D3D3D;
+               font-family:monospace; font-size:12px; text-align:center; border-radius:4px; padding:0; }
   .stepInput:focus { outline:2px solid #E8FF00; border-color:#E8FF00; }
-  .stepLabel { min-width:88px; }
 </style>
 </head>
 <body>
 <div id="status">Loading...</div>
-<div id="controls">
-  <button id="playBtn">Play next lap</button>
-  <button id="overviewBtn">Overview (top-down)</button>
-  <label id="rotWrap"><span class="stepLabel">Rotation</span>
-    <button class="stepBtn" data-ctl="rot" data-dir="-1">-</button>
-    <input class="stepInput" id="rotVal" type="number" step="0.5" value="-2.5">
-    <button class="stepBtn" data-ctl="rot" data-dir="1">+</button>&deg;
-  </label>
-  <label id="rotWrap"><span class="stepLabel">Zoom</span>
-    <button class="stepBtn" data-ctl="zoom" data-dir="-1">-</button>
-    <input class="stepInput" id="zoomVal" type="number" step="0.1" value="0.3">
-    <button class="stepBtn" data-ctl="zoom" data-dir="1">+</button>x
-  </label>
-  <label id="rotWrap"><span class="stepLabel">Shift E/W</span>
-    <button class="stepBtn" data-ctl="panE" data-dir="-1">-</button>
-    <input class="stepInput" id="panEVal" type="number" step="1" value="-518">
-    <button class="stepBtn" data-ctl="panE" data-dir="1">+</button>m
-  </label>
-  <label id="rotWrap"><span class="stepLabel">Shift N/S</span>
-    <button class="stepBtn" data-ctl="panN" data-dir="-1">-</button>
-    <input class="stepInput" id="panNVal" type="number" step="1" value="-348">
-    <button class="stepBtn" data-ctl="panN" data-dir="1">+</button>m
-  </label>
-  <label id="rotWrap"><span class="stepLabel">Cam Height</span>
-    <button class="stepBtn" data-ctl="camH" data-dir="-1">-</button>
-    <input class="stepInput" id="camHVal" type="number" step="1" value="145">
-    <button class="stepBtn" data-ctl="camH" data-dir="1">+</button>m
-  </label>
-  <label id="rotWrap"><span class="stepLabel">Cam Pitch</span>
-    <button class="stepBtn" data-ctl="camP" data-dir="-1">-</button>
-    <input class="stepInput" id="camPVal" type="number" step="1" value="-13">
-    <button class="stepBtn" data-ctl="camP" data-dir="1">+</button>&deg;
-  </label>
+<div id="panel">
+  <button class="wide" id="panelToggle">Hide controls</button>
+  <div id="panelBody">
+    <button class="wide" id="playBtn">Play next lap</button>
+    <button class="wide" id="overviewBtn">Overview (top-down)</button>
+    <div class="row">Zoom
+      <div class="ctl"><button class="stepBtn" data-ctl="zoom" data-dir="-1">-</button>
+      <input class="stepInput" id="zoomVal" type="number" step="0.1" value="0.3">
+      <button class="stepBtn" data-ctl="zoom" data-dir="1">+</button>x</div></div>
+    <div class="row">Cam height
+      <div class="ctl"><button class="stepBtn" data-ctl="camH" data-dir="-1">-</button>
+      <input class="stepInput" id="camHVal" type="number" step="1" value="145">
+      <button class="stepBtn" data-ctl="camH" data-dir="1">+</button>m</div></div>
+    <div class="row">Cam pitch
+      <div class="ctl"><button class="stepBtn" data-ctl="camP" data-dir="-1">-</button>
+      <input class="stepInput" id="camPVal" type="number" step="1" value="-13">
+      <button class="stepBtn" data-ctl="camP" data-dir="1">+</button>&deg;</div></div>
+    <div class="row">Ghost rotation (fine-tune)
+      <div class="ctl"><button class="stepBtn" data-ctl="rot" data-dir="-1">-</button>
+      <input class="stepInput" id="rotVal" type="number" step="0.5" value="0">
+      <button class="stepBtn" data-ctl="rot" data-dir="1">+</button>&deg;</div></div>
+    <div class="row">Ghost shift E/W
+      <div class="ctl"><button class="stepBtn" data-ctl="panE" data-dir="-1">-</button>
+      <input class="stepInput" id="panEVal" type="number" step="1" value="0">
+      <button class="stepBtn" data-ctl="panE" data-dir="1">+</button>m</div></div>
+    <div class="row">Ghost shift N/S
+      <div class="ctl"><button class="stepBtn" data-ctl="panN" data-dir="-1">-</button>
+      <input class="stepInput" id="panNVal" type="number" step="1" value="0">
+      <button class="stepBtn" data-ctl="panN" data-dir="1">+</button>m</div></div>
+  </div>
 </div>
 <div id="cesiumContainer"></div>
 
@@ -73,43 +72,35 @@
 
 const CESIUM_ION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJmYjU2ZGRhNy00YzFlLTRlNmItYjIyZC02NGVkZTE3NDVkNWEiLCJpZCI6NDUzNTM3LCJzdWIiOiJNYXR6dW5hZ2EiLCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoiRjEgdGVzdGluZyAiLCJpYXQiOjE3ODM1MjA2OTd9.YKRKC1nre1fGJqU5NhdN6YFPVpMGzxW1sMuRrOY15yQ";
 
-const MUNICH_CENTERLINE_URL = "https://raw.githubusercontent.com/TUMFTM/racetrack-database/master/tracks/Silverstone.csv";
+/* ============================================================
+   TRACK: the real Silverstone GP circuit from OpenStreetMap
+   (highway=raceway ways, stitched in driving order into one
+   closed loop, about 5.89 km). These are the same OSM features
+   Cesium's OSM Buildings are built from, so the line and the
+   buildings agree. Stored as a closed loop of lat/lon in
+   millionths of a degree: the first pair is absolute, the rest
+   are differences, each number written in base 36.
+   ============================================================ */
+const OSM_TRACK_ENC = "uzzt0.-ly4l bl.ee tw.113 xl.15p bz.f0 2f.30 28.2y 10.1g h.s e.t h.16 g.1b e.1e e.1e 9.17 9.1n a.1o 7.1m 8.29 7.2m 5.29 2.1y 1.2q -1.3x -3.26 -6.27 -e.4v -j.5d -l.6h -1p.h6 -h.54 -5.2u -3.2v 1.32 8.3l 7.34 c.32 i.2y i.2u f.26 p.31 r.2p 10.34 15.30 27.4q s1.1kv q.25 e.1f 8.17 4.18 3.1c 1.17 -2.10 -6.13 -c.1a -c.10 -e.10 -h.y -i.w -y.y -13.o -44.28 -iv.9e -i.c -g.d -e.d -f.g -i.p -k.t -f.v -e.z -d.10 -9.z -7.19 -3.12 1.y 3.15 8.y c.16 i.19 r.1a r.10 u.w 1i.1e w.u 16.v 17.u 1n.14 1g.x 25.1e 2m.1f 2d.13 2n.17 2u.14 2l.x 2o.q 2z.l 2z.g 1z.7 1p.3 20.2 1g.-5 1h.-d 1b.-k 17.-p v.-s u.-u v.-19 2f.-43 3u.-6z 58.-8r 4j.-7z 4g.-7y vc.-1ju f8.-rc 8m.-fc 1u.-3b f3.-ra eh.-qj 14.-2h r.-1v i.-1m i.-1v i.-1z c.-1x a.-1l 7.-1d 4.-12 4.-23 1.-23 0.-23 -3.-22 -7.-23 -9.-20 -d.-1y -g.-1z -k.-1x -a.-v -l.-1m -a.-n -f.-s -d.-m -r.-14 -e.-k -i.-p -j.-k -m.-k -p.-i -u.-j -y.-e -w.-7 -g2.-2h -1w.-j -1p.-v -w.-p -v.-u -x.-z -x.-15 -s.-13 -p.-1b -v.-1o -j.-16 -f.-12 -a.-x -9.-z -d.-1c -c.-1i -7.-1d -4.-18 -3.-1h -2.-1n 1.-1f 4.-1m 6.-1c b.-1j c.-1f g.-1o m.-1x l.-1h m.-19 l.-10 l.-y p.-x 12.-18 f.-f s.-r u.-p r.-g n.-f m.-c k.-a k.-7 n.-7 t.-5 l.-3 p.1 l.2 p.4 v.7 x.d z.e 19.v 10.s 84.6q 9q.7q 7b.5u 3c.2o t.p x.t u.u r.t 1e.1g 17.1e z.1a 1g.22 1o.2e 1o.2f 1f.24 1a.24 2u.53 2p.5j 17.2m 10.29 s.1t 1j.46 1b.3w r.2s o.2o r.3k r.4c j.3f e.38 d.3l b.3o d.4o h.6m 12.hc 36.1i0 3i.1yc 7.7t 1.27 -1.1u -3.20 -7.1v -j.33 -l.2i -o.2h -v.2u -18.36 -1t.3r -1h.2h -13.1l -16.1i -17.1a -18.17 -1f.17 -3e.25 -3i.20 -2u.1o -2p.1b -3z.1v -9m.4e -7m.2z -49.1c -5q.1u -61.1k -3d.n -3d.j -4v.o -4n.k -6u.r -7n.q -be.u -bc.l -32.7 -2w.9 -1n.9 -1m.c -1o.j -1y.p -23.10 -19.r -1i.10 -1r.18 -1p.1a -19.y -12.11 -1h.1d -1c.1g -3r.3y -18.13 -18.s -1c.r -r.a -s.8 -p.5 -v.5 -o.0 -q.1 -y.-3 -q.-4 -n.-5 -q.-8 -10.-g -16.-l -u.-f -1e.-t -4h.-2u -4c.-2k -2z.-1s -23.-18 -1j.-y -2d.-1c -r.-c -15.-f -1k.-k -1h.-d -1o.-d -1i.-7 -1m.-4 -1c.2 -1p.a -1a.c -1m.n -1f.r -15.o -1d.z -1b.1a -w.z -17.1h -5i.70 -1i.22 -q.x -x.13 -t.t -19.v -1g.u -s.e -16.i -1r.g -13.4 -z.1 -16.-1 -13.-6 -1f.-a -17.-g -1a.-o -15.-u -15.-y -1s.-1l -y.-15 -13.-1k -13.-1o -1n.-38 -3.-8 -p.-1k -p.-1m -v.-27 -t.-23 -13.-2q -11.-2r -w.-2c -10.-2l -q.-20 -g.-1d -p.-23 -z.-2v -15.-2r -l.-17 -p.-1p -y.-1x -r.-1d -t.-1c -x.-1e -q.-z -x.-14 -x.-12 -19.-1c -1h.-1g -20.-1q -wb.-ss -qt.-ms -10r.-vl -cn.-b6 -5w.-54 -5y.-5c -1s.-1q -3j.-3d -2i.-2f -1m.-1n -1i.-1j -34.-35 -2t.-2x -4i.-4u -3h.-3u -1r.-1y -1i.-1n -3d.-3w -20.-2e -2f.-2r -2g.-2x -1p.-24 -12.-1f -14.-1m -t.-1b -p.-16 -r.-1i -h.-z -j.-13 -l.-18 -m.-1h -k.-1x -m.-28 -f.-1s -d.-20 -b.-1x -9.-2j -3.-1s -3.-1q -2.-1k 0.-1z 6.-33 9.-2a d.-26 f.-24 h.-22 k.-27 t.-2j s.-20 t.-1t k.-17 n.-15 v.-1g o.-16 y.-19 s.-10 z.-14 17.-18 y.-w 1e.-13 1u.-17 1p.-12 1k.-14 1m.-14 1d.-15 1d.-14 1a.-14 1l.-1d 1l.-1g 1w.-1s 28.-28 59.-5k 1n.-1r 1x.-27 2j.-31 1g.-1v 1b.-1n 1j.-20 1b.-1w 36.-4m 17.-20 8k.-d4 6d.-95 ah.-ed 4d.-60 s.-1a m.-1h d.-1g 3.-1t -5.-1r -b.-1m -i.-1l -s.-1l -5k.-8z -d.-t -n.-1j -h.-23 -9.-2t 0.-12 1.-1k 9.-1x g.-1q j.-1m x.-1w 1g.-2e 2d.-3m 2d.-3c 2d.-31 s.-z 28.-2f 22.-1v 2r.-2b 2y.-22 30.-1o 2g.-13 2k.-z 18.-c 19.-b 20.-e 1s.6 1g.e 19.q 12.10 19.1h 2g.37 g.j 18.1j";
 
-// Rotation, shift, camera height and pitch are live number controls
-// (type a value, tap -/+, or hold a button). The yellow line redraws in
-// real time against the satellite imagery.
-let ROTATION_OFFSET_DEG = -2.5;
+// Ghost fine-tune (applied on top of the automatic telemetry fit).
+let ghostRotDeg = 0, ghostEastM = 0, ghostNorthM = 0;
 const DISTANCE_BEHIND = 60;
-
-// Camera height (meters above track) and pitch (degrees, 0 = level with
-// horizon, -90 = straight down). playLap() reads these every frame.
 let cameraHeightM = 145;
 let cameraPitchDeg = -13;
-
-// Zoom multiplier. playLap() forces the camera to an exact position every
-// frame, so pinch-to-zoom gets overridden; this value is read inside that
-// same per-frame update so zoom actually sticks during playback.
 let zoomMultiplier = 0.3;
+const CAR_LIFT_M = 1.5;       // red car rides this far above the terrain
+const TRACK_STEP_M = 5;       // spacing of the playback points
 
-// Live position offset, in real meters east and north of the anchor.
-// Fixes a translation error separately from rotation, which is a
-// different kind of error.
-let panEastM = -518;
-let panNorthM = -348;
-
-function rotateXY(dx, dy, angleDeg) {
-  const rad = Cesium.Math.toRadians(angleDeg);
-  return {
-    x: dx * Math.cos(rad) - dy * Math.sin(rad),
-    y: dx * Math.sin(rad) + dy * Math.cos(rad),
-  };
-}
+const ANCHOR_LAT = 52.0717;
+const ANCHOR_LON = -1.0159;
+const KLAT = 111320;
+const KLON = 111320 * Math.cos(ANCHOR_LAT * Math.PI / 180);
+const toEN = (lat, lon) => [(lon - ANCHOR_LON) * KLON, (lat - ANCHOR_LAT) * KLAT];
+const fromEN = (e, n) => ({ lat: ANCHOR_LAT + n / KLAT, lon: ANCHOR_LON + e / KLON });
 
 const statusEl = document.getElementById("status");
-function log(msg) {
-  console.log(msg);
-  statusEl.textContent = msg;
-}
+function log(msg) { console.log(msg); statusEl.textContent = msg; }
 
 try {
   if (typeof Cesium === "undefined") {
@@ -121,15 +112,140 @@ try {
   throw err;
 }
 
-let viewer;
-let centerlineLatLon = [];  // track points in local meters, from Munich data
-let carFrames = [];         // OpenF1 position samples, in arrival order
+let viewer, terrainProvider;
+let carFrames = [];
+let lapBoundaries = [];
+let trackEN = [];              // closed loop, local east/north meters, starts at the start/finish line
+let trackCart = [];            // same points as Cartesian at terrain height + lift
+let trackGroundCart = [];      // same points at height 0, for the clamped yellow line
+let trackHeadings = [];
+let fit = null;                // telemetry-to-track rigid fit
 let trackPolylineEntity = null;
+let startFinishEntity = null;
+
+/* ---------- small geometry helpers (all in local east/north meters) ---------- */
+const mean2 = pts => { let x = 0, y = 0; pts.forEach(p => { x += p[0]; y += p[1]; }); return [x / pts.length, y / pts.length]; };
+const rot2 = (p, th) => [p[0] * Math.cos(th) - p[1] * Math.sin(th), p[0] * Math.sin(th) + p[1] * Math.cos(th)];
+
+function decodeOsmTrack() {
+  let a = 0, b = 0;
+  const pts = OSM_TRACK_ENC.split(" ").map(s => {
+    const [x, y] = s.split(".");
+    a += parseInt(x, 36); b += parseInt(y, 36);
+    return toEN(a / 1e6, b / 1e6);
+  });
+  const f = pts[0], l = pts[pts.length - 1];
+  if (Math.hypot(f[0] - l[0], f[1] - l[1]) < 0.5) pts.pop();   // loop is stored closed; drop the duplicate
+  return pts;
+}
+
+function resampleClosed(pts, step) {
+  const p = pts.concat([pts[0]]);
+  const cum = [0];
+  for (let i = 1; i < p.length; i++) cum.push(cum[i - 1] + Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]));
+  const L = cum[cum.length - 1], N = Math.round(L / step), out = [];
+  let j = 0;
+  for (let k = 0; k < N; k++) {
+    const s = L * k / N;
+    while (j < cum.length - 2 && cum[j + 1] < s) j++;
+    const f = (s - cum[j]) / ((cum[j + 1] - cum[j]) || 1);
+    out.push([p[j][0] + (p[j + 1][0] - p[j][0]) * f, p[j][1] + (p[j + 1][1] - p[j][1]) * f]);
+  }
+  return { pts: out, length: L };
+}
+
+function resampleOpen(pts, n) {
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const L = cum[cum.length - 1], out = [];
+  let j = 0;
+  for (let k = 0; k < n; k++) {
+    const s = L * k / (n - 1);
+    while (j < cum.length - 2 && cum[j + 1] < s) j++;
+    const f = (s - cum[j]) / ((cum[j + 1] - cum[j]) || 1);
+    out.push([pts[j][0] + (pts[j + 1][0] - pts[j][0]) * f, pts[j][1] + (pts[j + 1][1] - pts[j][1]) * f]);
+  }
+  return out;
+}
+
+function nearestIdx(q, pts) {
+  let best = 1e18, bi = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const dx = pts[i][0] - q[0], dy = pts[i][1] - q[1], d = dx * dx + dy * dy;
+    if (d < best) { best = d; bi = i; }
+  }
+  return { idx: bi, dist: Math.sqrt(best) };
+}
+
+/* ---------- telemetry: OpenF1 x/y are in decimeters, in their own frame ----------
+   Find the rotation (and mirror, if needed) plus shift that lays one clean lap
+   of telemetry onto the real track: coarse search over angles, then ICP. */
+function fitTelemetryToTrack(trackDense, lapXY) {
+  const ct = mean2(trackDense);
+  const P = resampleOpen(lapXY, 500);
+  let best = { err: 1e18 };
+  for (const refl of [1, -1]) {
+    const Q = P.map(p => [p[0], p[1] * refl]);
+    const cq = mean2(Q);
+    for (let deg = 0; deg < 360; deg += 5) {
+      const th = deg * Math.PI / 180;
+      let s = 0;
+      for (let i = 0; i < Q.length; i++) {
+        const r = rot2([Q[i][0] - cq[0], Q[i][1] - cq[1]], th);
+        s += nearestIdx([r[0] + ct[0], r[1] + ct[1]], trackDense).dist;
+      }
+      const err = s / Q.length;
+      if (err < best.err) {
+        const rc = rot2(cq, th);
+        best = { err, refl, th, t: [ct[0] - rc[0], ct[1] - rc[1]] };
+      }
+    }
+  }
+  const apply = (f, p) => { const r = rot2([p[0], p[1] * f.refl], f.th); return [r[0] + f.t[0], r[1] + f.t[1]]; };
+  for (let it = 0; it < 40; it++) {
+    const cur = P.map(p => apply(best, p));
+    const tgt = cur.map(c => trackDense[nearestIdx(c, trackDense).idx]);
+    const mp = mean2(cur), mt = mean2(tgt);
+    let sd = 0, sc = 0;
+    for (let i = 0; i < cur.length; i++) {
+      const a = [cur[i][0] - mp[0], cur[i][1] - mp[1]], b = [tgt[i][0] - mt[0], tgt[i][1] - mt[1]];
+      sd += a[0] * b[0] + a[1] * b[1]; sc += a[0] * b[1] - a[1] * b[0];
+    }
+    const dth = Math.atan2(sc, sd);
+    const rt = rot2([best.t[0] - mp[0], best.t[1] - mp[1]], dth);
+    best = { ...best, th: best.th + dth, t: [rt[0] + mt[0], rt[1] + mt[1]] };
+  }
+  const d = P.map(p => nearestIdx(apply(best, p), trackDense).dist).sort((a, b) => a - b);
+  best.meanErr = d.reduce((a, b) => a + b, 0) / d.length;
+  best.p90 = d[Math.floor(d.length * 0.9)];
+  best.center = ct;
+  best.apply = p => apply(best, p);
+  return best;
+}
+
+/* Local meters for one telemetry frame, after the fit and the ghost fine-tune. */
+function frameToEN(f) {
+  const p = fit.apply([f.x / 10, f.y / 10]);
+  if (!ghostRotDeg && !ghostEastM && !ghostNorthM) return p;
+  const r = rot2([p[0] - fit.center[0], p[1] - fit.center[1]], ghostRotDeg * Math.PI / 180);
+  return [r[0] + fit.center[0] + ghostEastM, r[1] + fit.center[1] + ghostNorthM];
+}
+
+function lapFrameRange(frameTimes, lap) {
+  const startT = lapBoundaries[lap].date_start;
+  const endT = lap + 1 < lapBoundaries.length ? lapBoundaries[lap + 1].date_start : Infinity;
+  const s = frameTimes.findIndex(t => t >= startT);
+  if (s === -1) return null;
+  let e = frameTimes.findIndex(t => t >= endT);
+  if (e === -1) e = frameTimes.length;
+  return [s, e];
+}
 
 async function init() {
   log("Setting up Cesium viewer...");
+  terrainProvider = await Cesium.createWorldTerrainAsync();
   viewer = new Cesium.Viewer("cesiumContainer", {
-    terrain: Cesium.Terrain.fromWorldTerrain(),
+    terrainProvider,
     baseLayerPicker: false,
     timeline: false,
     animation: false,
@@ -137,28 +253,55 @@ async function init() {
   viewer.scene.primitives.add(await Cesium.createOsmBuildingsAsync());
 
   try {
-    await Promise.all([loadMunichCenterline(), loadOpenF1Data()]);
-    recomputeGeometry();
+    log("Loading telemetry from OpenF1...");
+    await loadOpenF1Data();
 
-    log("Data loaded. Position samples: " + carFrames.length +
-        " | Centerline points: " + centerlineLatLon.length +
-        " | Ghost buffer laps: " + lapBuffers.length +
-        "\nAdjust Rotation / Shift to match the track, tap Overview to check, or Play next lap.");
+    log("Building the track from OpenStreetMap and fitting telemetry...");
+    const loop = resampleClosed(decodeOsmTrack(), TRACK_STEP_M);
+    trackEN = loop.pts;
+    const dense = resampleClosed(trackEN, 2).pts;
+
+    const frameTimes = carFrames.map(f => new Date(f.date).getTime());
+    const fitLap = Math.min(2, lapBoundaries.length - 1);
+    const rng = lapFrameRange(frameTimes, fitLap);
+    fit = fitTelemetryToTrack(dense, carFrames.slice(rng[0], rng[1]).map(f => [f.x / 10, f.y / 10]));
+
+    // Start/finish: where the real lap-start timestamps sit on the track.
+    const starts = [];
+    for (let lap = 1; lap < lapBoundaries.length; lap++) {
+      const r = lapFrameRange(frameTimes, lap);
+      if (r) starts.push(nearestIdx(fit.apply([carFrames[r[0]].x / 10, carFrames[r[0]].y / 10]), trackEN).idx);
+    }
+    const N = trackEN.length;
+    let startIdx = starts[0] || 0, off = 0;
+    starts.forEach(s => { let d = s - starts[0]; if (d > N / 2) d -= N; if (d < -N / 2) d += N; off += d; });
+    startIdx = ((starts[0] + Math.round(off / starts.length)) % N + N) % N;
+    trackEN = trackEN.slice(startIdx).concat(trackEN.slice(0, startIdx));
+
+    await buildTrackGeometry();
+    buildLapBuffers();
+
+    log("Ready. Track: " + (loop.length / 1000).toFixed(2) + " km from OpenStreetMap" +
+        " | Telemetry fit: mean " + fit.meanErr.toFixed(1) + " m, 90% within " + fit.p90.toFixed(1) + " m" +
+        " | Laps: " + lapBuffers.length + "\nTap Overview to check, or Play next lap.");
 
     document.getElementById("playBtn").onclick = () => playLap();
     document.getElementById("overviewBtn").onclick = () => showOverview();
+    document.getElementById("panelToggle").onclick = () => {
+      const body = document.getElementById("panelBody");
+      const hide = body.style.display !== "none";
+      body.style.display = hide ? "none" : "flex";
+      document.getElementById("panelToggle").textContent = hide ? "Show controls" : "Hide controls";
+    };
 
     // Each control is a tap-to-type number input flanked by - / + buttons.
-    // Sliders were nearly impossible to fine-tune with a fingertip on
-    // iPhone. Type an exact value, tap once for a small nudge, or
-    // press-and-hold a button to run through values quickly.
     const controls = {
-      rot:  { min: -180,  max: 180,  onChange: v => { ROTATION_OFFSET_DEG = v; recomputeGeometry(); } },
-      zoom: { min: 0.3,   max: 4.0,  onChange: v => { zoomMultiplier = v; } },
-      panE: { min: -1000, max: 1000, onChange: v => { panEastM = v; recomputeGeometry(); } },
-      panN: { min: -1000, max: 1000, onChange: v => { panNorthM = v; recomputeGeometry(); } },
-      camH: { min: 5,     max: 500,  onChange: v => { cameraHeightM = v; } },
-      camP: { min: -90,   max: -5,   onChange: v => { cameraPitchDeg = v; } },
+      zoom: { min: 0.3,  max: 4.0,  onChange: v => { zoomMultiplier = v; } },
+      camH: { min: 5,    max: 500,  onChange: v => { cameraHeightM = v; } },
+      camP: { min: -90,  max: -5,   onChange: v => { cameraPitchDeg = v; } },
+      rot:  { min: -30,  max: 30,   onChange: v => { ghostRotDeg = v; buildLapBuffers(); } },
+      panE: { min: -300, max: 300,  onChange: v => { ghostEastM = v; buildLapBuffers(); } },
+      panN: { min: -300, max: 300,  onChange: v => { ghostNorthM = v; buildLapBuffers(); } },
     };
     const idFor = { rot: "rotVal", zoom: "zoomVal", panE: "panEVal", panN: "panNVal", camH: "camHVal", camP: "camPVal" };
 
@@ -166,21 +309,18 @@ async function init() {
       const { min, max, onChange } = controls[ctl];
       const input = document.getElementById(idFor[ctl]);
       const step = Number(input.step) || 1;
-
       const commit = (v) => {
         v = Math.max(min, Math.min(max, v));
         input.value = v;
         onChange(v);
       };
-      // Typing a value directly (blur or Enter commits it).
       input.addEventListener("change", () => commit(Number(input.value) || 0));
       input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); });
 
-      // Tap = one step. Press-and-hold = repeats, speeding up after ~1.5s.
       document.querySelectorAll(`.stepBtn[data-ctl="${ctl}"]`).forEach(btn => {
         const dir = Number(btn.dataset.dir);
         let repeatTimer = null, holdTimeout = null, ticks = 0;
-        const doStep = () => commit(Number(input.value) + dir * step);
+        const doStep = () => commit(Math.round((Number(input.value) + dir * step) * 100) / 100);
         const startHold = () => {
           doStep();
           holdTimeout = setTimeout(() => {
@@ -206,77 +346,59 @@ async function init() {
       });
     });
   } catch (err) {
-    log("FAILED: " + err.message + "\n\nCheck the setup step at the top of this file.");
+    log("FAILED: " + err.message);
     console.error(err);
   }
 }
 
-// Flies straight above the whole track so the entire yellow polyline is
-// visible against the satellite imagery in one shot.
 function showOverview() {
-  const sphere = Cesium.BoundingSphere.fromPoints(centerlineCartesians);
+  const sphere = Cesium.BoundingSphere.fromPoints(trackCart);
   viewer.camera.flyToBoundingSphere(sphere, {
     offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-90), sphere.radius * 2.5),
     duration: 1.5,
   });
 }
 
-// --- Step 1: real track geometry (Munich database) ---
-// ANCHOR: Silverstone's real-world coordinates. Local file meters get
-// placed against this real point.
-const ANCHOR_LAT = 52.0717;
-const ANCHOR_LON = -1.0159;
-let centerlineCartesians = [];
-let centerlineHeadings = [];  // per-point track heading, radians, for camera aim
+/* Terrain heights for every track point, then cars/camera ride on the real ground. */
+async function buildTrackGeometry() {
+  const cartos = trackEN.map(p => { const g = fromEN(p[0], p[1]); return Cesium.Cartographic.fromDegrees(g.lon, g.lat); });
+  let heights = cartos.map(() => 0), terrainOk = true;
+  try {
+    const sampled = await Cesium.sampleTerrainMostDetailed(terrainProvider, cartos);
+    heights = sampled.map(c => (typeof c.height === "number" && isFinite(c.height)) ? c.height : 0);
+  } catch (e) {
+    terrainOk = false;
+    console.warn("Terrain sampling failed, using height 0:", e);
+  }
+  window.__terrainOk = terrainOk;
+  trackCart = trackEN.map((p, i) => { const g = fromEN(p[0], p[1]); return Cesium.Cartesian3.fromDegrees(g.lon, g.lat, heights[i] + CAR_LIFT_M); });
+  trackGroundCart = trackEN.map(p => { const g = fromEN(p[0], p[1]); return Cesium.Cartesian3.fromDegrees(g.lon, g.lat, 0); });
 
-async function loadMunichCenterline() {
-  const res = await fetch(MUNICH_CENTERLINE_URL);
-  if (!res.ok) throw new Error("Munich centerline fetch failed (" + res.status + ").");
-  const text = await res.text();
-  const lines = text.trim().split("\n").filter(l => !l.startsWith("#"));
-  centerlineLatLon = lines.map(line => {
-    const [x, y] = line.split(",").map(Number);
-    return { x_m: x, y_m: y };
+  const N = trackEN.length, AHEAD = 3;
+  trackHeadings = trackEN.map((p, i) => {
+    const q = trackEN[(i + AHEAD) % N];
+    return Math.atan2(q[0] - p[0], q[1] - p[1]);
   });
-}
-
-// Rebuilds all rotation/shift-dependent geometry (track line, headings,
-// car telemetry, ghost buffers). Called once at load, then live every
-// time a control changes.
-function recomputeGeometry() {
-  const x0 = centerlineLatLon[0].x_m;
-  const y0 = centerlineLatLon[0].y_m;
-  const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 0);
-  const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
-
-  centerlineCartesians = centerlineLatLon.map(pt => {
-    const r = rotateXY(pt.x_m - x0, pt.y_m - y0, ROTATION_OFFSET_DEG);
-    return Cesium.Matrix4.multiplyByPoint(enuMatrix, new Cesium.Cartesian3(r.x + panEastM, r.y + panNorthM, 0), new Cesium.Cartesian3());
-  });
-
-  centerlineHeadings = centerlineLatLon.map((pt, i) => {
-    const next = centerlineLatLon[(i + 1) % centerlineLatLon.length];
-    const r = rotateXY(next.x_m - pt.x_m, next.y_m - pt.y_m, ROTATION_OFFSET_DEG);
-    return Math.atan2(r.x, r.y);
-  });
-
-  mapCarTelemetryToRealWorld();
-  buildLapBuffers();
 
   if (trackPolylineEntity) viewer.entities.remove(trackPolylineEntity);
   trackPolylineEntity = viewer.entities.add({
     polyline: {
-      positions: centerlineCartesians,
+      positions: trackGroundCart.concat([trackGroundCart[0]]),   // closed loop
       width: 4,
       material: Cesium.Color.fromCssColorString("#E8FF00"),
       clampToGround: true,
     },
   });
+  if (startFinishEntity) viewer.entities.remove(startFinishEntity);
+  startFinishEntity = viewer.entities.add({
+    position: trackCart[0],
+    point: { pixelSize: 12, color: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2 },
+    label: { text: "START / FINISH", font: "12px monospace", fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK,
+             outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -18) },
+  });
 }
 
-// --- Step 2: real car telemetry (OpenF1) ---
-let lapBoundaries = [];  // [{lap_number, date_start}], sorted, real lap-line crossings
-
+/* ---------- OpenF1 ---------- */
 async function loadOpenF1Data() {
   // 2026 Silverstone was a Sprint weekend: OpenF1 tags BOTH the Sprint
   // (Saturday) and the Grand Prix (Sunday) as session_type "Race".
@@ -295,8 +417,6 @@ async function loadOpenF1Data() {
   carFrames = await locRes.json();
   if (!carFrames.length) throw new Error("No location data returned for driver " + driver.driver_number + ".");
 
-  // Real lap boundaries (start-of-lap timestamps), not a guessed slice
-  // count, so lap breaks land on the actual start/finish line.
   const lapRes = await fetch(`https://api.openf1.org/v1/laps?session_key=${sessionKey}&driver_number=${driver.driver_number}`);
   const laps = await lapRes.json();
   lapBoundaries = laps
@@ -306,41 +426,26 @@ async function loadOpenF1Data() {
   if (!lapBoundaries.length) throw new Error("No lap boundary data returned — can't slice laps accurately.");
 }
 
-// --- Step 3: GHOST BUFFER ---
+/* ---------- ghost buffers ---------- */
 const SAMPLES_PER_LAP = 300;
 const MAX_GHOSTS = 4;
-
-let carCartesiansAll = [];
 let lapBuffers = [];
 let currentLapIndex = 0;
 let ghostEntities = [];
 let liveCarEntity = null;
-let REAL_LAP_COUNT_V0 = 0;  // set from real lap boundary data, not guessed
+let REAL_LAP_COUNT_V0 = 0;
 
-function mapCarTelemetryToRealWorld() {
-  const x0 = carFrames[0].x;
-  const y0 = carFrames[0].y;
-  const anchorCartesian = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT, 0);
-  const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCartesian);
-  carCartesiansAll = carFrames.map(f => {
-    const r = rotateXY(f.x - x0, f.y - y0, ROTATION_OFFSET_DEG);
-    return Cesium.Matrix4.multiplyByPoint(enuMatrix, new Cesium.Cartesian3(r.x + panEastM, r.y + panNorthM, 0), new Cesium.Cartesian3());
-  });
-}
-
-// Slices carCartesiansAll on real lap-start timestamps from the OpenF1
-// /laps endpoint instead of dividing the sample array into guessed chunks.
 function buildLapBuffers() {
   const frameTimes = carFrames.map(f => new Date(f.date).getTime());
+  const carCartesiansAll = carFrames.map(f => {
+    const p = frameToEN(f), g = fromEN(p[0], p[1]);
+    return Cesium.Cartesian3.fromDegrees(g.lon, g.lat, 0);   // clamped to terrain when drawn
+  });
   lapBuffers = [];
   for (let lap = 0; lap < lapBoundaries.length; lap++) {
-    const startT = lapBoundaries[lap].date_start;
-    const endT = lap + 1 < lapBoundaries.length ? lapBoundaries[lap + 1].date_start : Infinity;
-    let startIdx = frameTimes.findIndex(t => t >= startT);
-    if (startIdx === -1) continue;
-    let endIdx = frameTimes.findIndex(t => t >= endT);
-    if (endIdx === -1) endIdx = frameTimes.length;
-    const chunk = carCartesiansAll.slice(startIdx, endIdx);
+    const r = lapFrameRange(frameTimes, lap);
+    if (!r) continue;
+    const chunk = carCartesiansAll.slice(r[0], r[1]);
     if (chunk.length < 2) continue;
     lapBuffers.push(resampleToFixedSteps(chunk, SAMPLES_PER_LAP));
   }
@@ -348,17 +453,12 @@ function buildLapBuffers() {
 }
 
 function resampleToFixedSteps(points, steps) {
-  if (points.length < 2) {
-    const fallback = points[0] || Cesium.Cartesian3.ZERO;
-    return new Array(steps).fill(fallback);
-  }
   const out = [];
   for (let i = 0; i < steps; i++) {
     const t = (i / (steps - 1)) * (points.length - 1);
     const i0 = Math.floor(t);
     const i1 = Math.min(i0 + 1, points.length - 1);
-    const frac = t - i0;
-    out.push(Cesium.Cartesian3.lerp(points[i0], points[i1], frac, new Cesium.Cartesian3()));
+    out.push(Cesium.Cartesian3.lerp(points[i0], points[i1], t - i0, new Cesium.Cartesian3()));
   }
   return out;
 }
@@ -366,32 +466,21 @@ function resampleToFixedSteps(points, steps) {
 function clearGhostEntities() {
   ghostEntities.forEach(e => viewer.entities.remove(e));
   ghostEntities = [];
-  if (liveCarEntity) {
-    viewer.entities.remove(liveCarEntity);
-    liveCarEntity = null;
-  }
+  if (liveCarEntity) { viewer.entities.remove(liveCarEntity); liveCarEntity = null; }
 }
 
-// --- Step 4: playback — camera flythrough + live car + ghost laps ---
+/* ---------- playback ---------- */
 let activePlaybackInterval = null;
 
 function playLap() {
-  if (!centerlineCartesians.length || !lapBuffers.length) { log("Data not ready — can't play."); return; }
+  if (!trackCart.length || !lapBuffers.length) { log("Data not ready — can't play."); return; }
 
-  // Kill any prior playback loop so two intervals never fight over the camera.
-  if (activePlaybackInterval !== null) {
-    clearInterval(activePlaybackInterval);
-    activePlaybackInterval = null;
-  }
-  // Cancel any in-flight Overview fly so it can't stomp the POV camera.
+  if (activePlaybackInterval !== null) { clearInterval(activePlaybackInterval); activePlaybackInterval = null; }
   viewer.camera.cancelFlight();
-
   clearGhostEntities();
 
   const ghostLapIndices = [];
-  for (let g = currentLapIndex - 1; g >= 0 && ghostLapIndices.length < MAX_GHOSTS; g--) {
-    ghostLapIndices.push(g);
-  }
+  for (let g = currentLapIndex - 1; g >= 0 && ghostLapIndices.length < MAX_GHOSTS; g--) ghostLapIndices.push(g);
 
   ghostEntities = ghostLapIndices.map((lapIdx, order) => {
     const age = order + 1;
@@ -399,6 +488,7 @@ function playLap() {
       point: {
         pixelSize: 10,
         color: Cesium.Color.fromCssColorString("#E8FF00").withAlpha(Math.max(0.15, 1 - age * 0.22)),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
       },
       position: lapBuffers[lapIdx][0],
     });
@@ -406,10 +496,10 @@ function playLap() {
 
   liveCarEntity = viewer.entities.add({
     point: { pixelSize: 14, color: Cesium.Color.fromCssColorString("#FF3C3C") },
-    position: centerlineCartesians[0],
+    position: trackCart[0],
   });
 
-  const total = centerlineCartesians.length;
+  const total = trackCart.length;
   let i = 0;
   log("Playing lap " + (currentLapIndex + 1) + " of " + REAL_LAP_COUNT_V0 +
       " — " + ghostLapIndices.length + " ghost(s) trailing.");
@@ -423,30 +513,19 @@ function playLap() {
           Math.min(currentLapIndex, MAX_GHOSTS) + " ghost(s) will trail next time.");
       return;
     }
-    const pos = centerlineCartesians[i];
-    const nextPos = centerlineCartesians[(i + 1) % total];
+    const pos = trackCart[i];
+    const ahead = trackCart[(i + 3) % total];
 
-    const forward = Cesium.Cartesian3.normalize(
-      Cesium.Cartesian3.subtract(nextPos, pos, new Cesium.Cartesian3()),
-      new Cesium.Cartesian3()
-    );
-    const groundNormal = Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3());
+    const forward = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(ahead, pos, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    const up = Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3());
     const cameraPos = Cesium.Cartesian3.add(
-      Cesium.Cartesian3.add(
-        pos,
-        Cesium.Cartesian3.multiplyByScalar(forward, -DISTANCE_BEHIND * zoomMultiplier, new Cesium.Cartesian3()),
-        new Cesium.Cartesian3()
-      ),
-      Cesium.Cartesian3.multiplyByScalar(groundNormal, cameraHeightM * zoomMultiplier, new Cesium.Cartesian3()),
+      Cesium.Cartesian3.add(pos, Cesium.Cartesian3.multiplyByScalar(forward, -DISTANCE_BEHIND * zoomMultiplier, new Cesium.Cartesian3()), new Cesium.Cartesian3()),
+      Cesium.Cartesian3.multiplyByScalar(up, cameraHeightM * zoomMultiplier, new Cesium.Cartesian3()),
       new Cesium.Cartesian3()
     );
     viewer.camera.setView({
       destination: cameraPos,
-      orientation: {
-        heading: centerlineHeadings[i],
-        pitch: Cesium.Math.toRadians(cameraPitchDeg),
-        roll: 0,
-      },
+      orientation: { heading: trackHeadings[i], pitch: Cesium.Math.toRadians(cameraPitchDeg), roll: 0 },
     });
 
     liveCarEntity.position = pos;
@@ -454,8 +533,7 @@ function playLap() {
     const progressFrac = i / (total - 1);
     ghostEntities.forEach((entity, idx) => {
       const buf = lapBuffers[ghostLapIndices[idx]];
-      const gi = Math.min(Math.round(progressFrac * (buf.length - 1)), buf.length - 1);
-      entity.position = buf[gi];
+      entity.position = buf[Math.min(Math.round(progressFrac * (buf.length - 1)), buf.length - 1)];
     });
 
     i += 1;
